@@ -9,7 +9,7 @@ use std::{fs, process};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
-use model::{CommentDocument, Reaction, Repository, Request};
+use model::{CommentDocument, Reaction, Repository, Request, ReviewEvent};
 use serde::Serialize;
 
 #[derive(Debug, Parser)]
@@ -28,6 +28,14 @@ enum Commands {
         #[command(subcommand)]
         command: CommentCommand,
     },
+    Issue {
+        #[command(subcommand)]
+        command: IssueCommand,
+    },
+    Pr {
+        #[command(subcommand)]
+        command: PullRequestCommand,
+    },
     Capabilities,
 }
 
@@ -45,6 +53,33 @@ enum CommentCommand {
     Edit(CommentEditArgs),
     Delete(CommentDeleteArgs),
     React(CommentReactArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum IssueCommand {
+    Create(IssueCreateArgs),
+    Edit(IssueEditArgs),
+    Close(TargetArgs),
+    Reopen(TargetArgs),
+    Labels(ListEditArgs),
+    Assignees(ListEditArgs),
+    React(ReactArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum PullRequestCommand {
+    Create(PullRequestCreateArgs),
+    Edit(PullRequestEditArgs),
+    Close(TargetArgs),
+    Reopen(TargetArgs),
+    Merge(ConfirmedTargetArgs),
+    Ready(TargetArgs),
+    Draft(TargetArgs),
+    Review(PullRequestReviewArgs),
+    Labels(ListEditArgs),
+    Assignees(ListEditArgs),
+    React(ReactArgs),
+    UpdateBranch(TargetArgs),
 }
 
 #[derive(Debug, Args)]
@@ -99,6 +134,122 @@ struct BodyArgs {
     body_file: Option<PathBuf>,
 }
 
+#[derive(Debug, Args)]
+struct TargetArgs {
+    number: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct ConfirmedTargetArgs {
+    #[command(flatten)]
+    target: TargetArgs,
+    #[arg(long)]
+    yes: bool,
+}
+
+#[derive(Debug, Args)]
+struct IssueCreateArgs {
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    title: String,
+    #[command(flatten)]
+    content: BodyArgs,
+    #[arg(long = "label")]
+    labels: Vec<String>,
+    #[arg(long = "assignee")]
+    assignees: Vec<String>,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct IssueEditArgs {
+    number: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    title: Option<String>,
+    #[command(flatten)]
+    content: BodyArgs,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct PullRequestCreateArgs {
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    title: String,
+    #[arg(long)]
+    head: String,
+    #[arg(long)]
+    base: String,
+    #[command(flatten)]
+    content: BodyArgs,
+    #[arg(long)]
+    draft: bool,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct PullRequestEditArgs {
+    number: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    title: Option<String>,
+    #[arg(long)]
+    base: Option<String>,
+    #[command(flatten)]
+    content: BodyArgs,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct PullRequestReviewArgs {
+    number: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long, value_enum)]
+    event: ReviewEvent,
+    #[command(flatten)]
+    content: BodyArgs,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct ListEditArgs {
+    number: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long = "add")]
+    add: Vec<String>,
+    #[arg(long = "remove")]
+    remove: Vec<String>,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct ReactArgs {
+    number: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long, value_enum)]
+    reaction: Reaction,
+    #[arg(long)]
+    dry_run: bool,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MutationResult {
@@ -131,6 +282,8 @@ fn run() -> Result<()> {
             execute(request, args.dry_run, cli.json)
         }
         Commands::Comment { command } => run_comment(command, cli.json),
+        Commands::Issue { command } => run_issue(command, cli.json),
+        Commands::Pr { command } => run_pull_request(command, cli.json),
         Commands::Capabilities => emit_capabilities(cli.json),
     }
 }
@@ -138,7 +291,7 @@ fn run() -> Result<()> {
 fn run_comment(command: CommentCommand, json: bool) -> Result<()> {
     match command {
         CommentCommand::Create(args) => execute(
-            Request::Create {
+            Request::CreateComment {
                 repository: args.repo,
                 number: args.number,
                 document: CommentDocument {
@@ -150,7 +303,7 @@ fn run_comment(command: CommentCommand, json: bool) -> Result<()> {
             json,
         ),
         CommentCommand::Edit(args) => execute(
-            Request::Edit {
+            Request::EditComment {
                 repository: args.repo,
                 comment_id: args.comment_id,
                 document: CommentDocument {
@@ -166,7 +319,7 @@ fn run_comment(command: CommentCommand, json: bool) -> Result<()> {
                 bail!("comment deletion requires --yes");
             }
             execute(
-                Request::Delete {
+                Request::DeleteComment {
                     repository: args.repo,
                     comment_id: args.comment_id,
                 },
@@ -175,7 +328,7 @@ fn run_comment(command: CommentCommand, json: bool) -> Result<()> {
             )
         }
         CommentCommand::React(args) => execute(
-            Request::React {
+            Request::ReactToComment {
                 repository: args.repo,
                 comment_id: args.comment_id,
                 reaction: args.reaction,
@@ -184,6 +337,189 @@ fn run_comment(command: CommentCommand, json: bool) -> Result<()> {
             json,
         ),
     }
+}
+
+fn run_issue(command: IssueCommand, json: bool) -> Result<()> {
+    match command {
+        IssueCommand::Create(args) => execute(
+            Request::IssueCreate {
+                repository: args.repo,
+                title: args.title,
+                body: read_optional_body(&args.content)?,
+                labels: args.labels,
+                assignees: args.assignees,
+            },
+            args.dry_run,
+            json,
+        ),
+        IssueCommand::Edit(args) => execute(
+            Request::IssueEdit {
+                repository: args.repo,
+                number: args.number,
+                title: args.title,
+                body: read_optional_body(&args.content)?,
+            },
+            args.dry_run,
+            json,
+        ),
+        IssueCommand::Close(args) => execute_issue_target(args, json, true),
+        IssueCommand::Reopen(args) => execute_issue_target(args, json, false),
+        IssueCommand::Labels(args) => execute(
+            Request::IssueLabels {
+                repository: args.repo,
+                number: args.number,
+                add: args.add,
+                remove: args.remove,
+            },
+            args.dry_run,
+            json,
+        ),
+        IssueCommand::Assignees(args) => execute(
+            Request::IssueAssignees {
+                repository: args.repo,
+                number: args.number,
+                add: args.add,
+                remove: args.remove,
+            },
+            args.dry_run,
+            json,
+        ),
+        IssueCommand::React(args) => execute(
+            Request::IssueReact {
+                repository: args.repo,
+                number: args.number,
+                reaction: args.reaction,
+            },
+            args.dry_run,
+            json,
+        ),
+    }
+}
+
+fn execute_issue_target(args: TargetArgs, json: bool, close: bool) -> Result<()> {
+    let request = if close {
+        Request::IssueClose {
+            repository: args.repo,
+            number: args.number,
+        }
+    } else {
+        Request::IssueReopen {
+            repository: args.repo,
+            number: args.number,
+        }
+    };
+    execute(request, args.dry_run, json)
+}
+
+fn run_pull_request(command: PullRequestCommand, json: bool) -> Result<()> {
+    match command {
+        PullRequestCommand::Create(args) => execute(
+            Request::PullRequestCreate {
+                repository: args.repo,
+                title: args.title,
+                body: read_optional_body(&args.content)?,
+                head: args.head,
+                base: args.base,
+                draft: args.draft,
+            },
+            args.dry_run,
+            json,
+        ),
+        PullRequestCommand::Edit(args) => execute(
+            Request::PullRequestEdit {
+                repository: args.repo,
+                number: args.number,
+                title: args.title,
+                body: read_optional_body(&args.content)?,
+                base: args.base,
+            },
+            args.dry_run,
+            json,
+        ),
+        PullRequestCommand::Close(args) => execute_pull_request_target(args, json, "close"),
+        PullRequestCommand::Reopen(args) => execute_pull_request_target(args, json, "reopen"),
+        PullRequestCommand::Merge(args) => {
+            if !args.yes && !args.target.dry_run {
+                bail!("pull request merge requires --yes");
+            }
+            execute_pull_request_target(args.target, json, "merge")
+        }
+        PullRequestCommand::Ready(args) => execute_pull_request_target(args, json, "ready"),
+        PullRequestCommand::Draft(args) => execute_pull_request_target(args, json, "draft"),
+        PullRequestCommand::Review(args) => execute(
+            Request::PullRequestReview {
+                repository: args.repo,
+                number: args.number,
+                event: args.event,
+                body: read_optional_body(&args.content)?,
+            },
+            args.dry_run,
+            json,
+        ),
+        PullRequestCommand::Labels(args) => execute(
+            Request::PullRequestLabels {
+                repository: args.repo,
+                number: args.number,
+                add: args.add,
+                remove: args.remove,
+            },
+            args.dry_run,
+            json,
+        ),
+        PullRequestCommand::Assignees(args) => execute(
+            Request::PullRequestAssignees {
+                repository: args.repo,
+                number: args.number,
+                add: args.add,
+                remove: args.remove,
+            },
+            args.dry_run,
+            json,
+        ),
+        PullRequestCommand::React(args) => execute(
+            Request::PullRequestReact {
+                repository: args.repo,
+                number: args.number,
+                reaction: args.reaction,
+            },
+            args.dry_run,
+            json,
+        ),
+        PullRequestCommand::UpdateBranch(args) => {
+            execute_pull_request_target(args, json, "update_branch")
+        }
+    }
+}
+
+fn execute_pull_request_target(args: TargetArgs, json: bool, action: &str) -> Result<()> {
+    let request = match action {
+        "close" => Request::PullRequestClose {
+            repository: args.repo,
+            number: args.number,
+        },
+        "reopen" => Request::PullRequestReopen {
+            repository: args.repo,
+            number: args.number,
+        },
+        "merge" => Request::PullRequestMerge {
+            repository: args.repo,
+            number: args.number,
+        },
+        "ready" => Request::PullRequestReady {
+            repository: args.repo,
+            number: args.number,
+        },
+        "draft" => Request::PullRequestDraft {
+            repository: args.repo,
+            number: args.number,
+        },
+        "update_branch" => Request::PullRequestUpdateBranch {
+            repository: args.repo,
+            number: args.number,
+        },
+        _ => bail!("unsupported pull request target action"),
+    };
+    execute(request, args.dry_run, json)
 }
 
 fn execute(request: Request, dry_run: bool, json: bool) -> Result<()> {
@@ -235,6 +571,13 @@ fn read_body(args: &BodyArgs) -> Result<String> {
     read_stdin_body()
 }
 
+fn read_optional_body(args: &BodyArgs) -> Result<Option<String>> {
+    if args.body.is_none() && args.body_file.is_none() {
+        return Ok(None);
+    }
+    read_body(args).map(Some)
+}
+
 fn read_stdin_body() -> Result<String> {
     let mut body = String::new();
     io::stdin()
@@ -268,6 +611,25 @@ fn emit_capabilities(json: bool) -> Result<()> {
             "comment.edit",
             "comment.delete",
             "comment.react",
+            "issue.create",
+            "issue.edit",
+            "issue.close",
+            "issue.reopen",
+            "issue.labels",
+            "issue.assignees",
+            "issue.react",
+            "pr.create",
+            "pr.edit",
+            "pr.close",
+            "pr.reopen",
+            "pr.merge",
+            "pr.ready",
+            "pr.draft",
+            "pr.review",
+            "pr.labels",
+            "pr.assignees",
+            "pr.react",
+            "pr.update-branch",
         ],
         media: media::supported_extensions(),
         output: vec!["text", "json"],

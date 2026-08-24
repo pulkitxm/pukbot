@@ -111,6 +111,21 @@ Inspect the stable machine-readable feature inventory:
 pukbot capabilities --json
 ```
 
+Issue operations include create, edit, close, reopen, labels, assignees, and
+reactions. Pull request operations include create, edit, close, reopen,
+squash-merge, ready, draft, review, labels, assignees, reactions, and branch
+updates. Every mutation is also accepted by `pukbot apply` as typed JSON.
+
+```bash
+pukbot issue create --repo owner/repository --title "bug" --label bug
+pukbot issue labels 123 --repo owner/repository --add urgent --remove stale
+pukbot pr review 456 --repo owner/repository --event approve --body "looks good"
+pukbot pr merge 456 --repo owner/repository --yes
+```
+
+See [Operations](docs/Operations.md) for the complete command and JSON
+contracts.
+
 Every comment ends with:
 
 ```markdown

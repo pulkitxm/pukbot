@@ -17,5 +17,10 @@ inserted in a comment.
 
 The release workflow builds five platform artifacts, verifies them, publishes
 the crate through crates.io Trusted Publishing, produces checksums and an SBOM,
-attests the binaries, and creates the GitHub Release. GitHub Pages receives only
-the two installer scripts and the custom-domain file.
+attests the binaries, generates completions and a manual, and creates the GitHub
+Release. GitHub Pages receives only the two installer scripts and the
+custom-domain file.
+
+The self-updater resolves a stable release tag, downloads the platform asset and
+checksum document with fixed limits, verifies SHA-256, and only then replaces
+the resolved executable while preserving its permissions.

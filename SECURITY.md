@@ -36,9 +36,11 @@ issue and pull request write access, validates every input independently, and
 discards the token after the job.
 
 Release installers use fixed GitHub release URLs and verify SHA-256 checksums
-before installing binaries. Pages contains only static installation files.
-Crates.io releases use OIDC Trusted Publishing after the first publication, so
-GitHub does not store a long-lived crates.io token.
+before installing binaries. The self-updater applies the same tag resolution,
+size limits, and checksum verification before replacing an executable. Pages
+contains only static installation files. Crates.io releases use OIDC Trusted
+Publishing after the first publication, so GitHub does not store a long-lived
+crates.io token.
 
 Protect `main`, require review for workflow changes, restrict the production
 environment to `main`, and do not grant agents permission to change protection

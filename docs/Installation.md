@@ -15,3 +15,12 @@ Windows PowerShell:
 Cargo:
 
     cargo install pukbot --locked
+
+Verify the installation and install completions for the current shell:
+
+    pukbot --version
+    pukbot completions --install
+
+Check for a release update without replacing the executable:
+
+    pukbot update --check

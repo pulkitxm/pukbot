@@ -42,6 +42,28 @@ cargo install pukbot --locked
 The installers download the matching binary from GitHub Releases and verify
 its SHA-256 checksum before installation.
 
+Update an installed release binary with the same checksum verification:
+
+```bash
+pukbot update
+pukbot update --check --json
+```
+
+Generate or install shell completions for Bash, Zsh, Fish, Elvish, and
+PowerShell:
+
+```bash
+pukbot completions zsh
+pukbot completions --install
+```
+
+Print a manual page or generate one page per command:
+
+```bash
+pukbot man
+pukbot man --dir ./man
+```
+
 ## Use
 
 Create a comment on an issue or pull request:

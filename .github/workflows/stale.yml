@@ -24,8 +24,12 @@ jobs:
         with:
           days-before-stale: 45
           days-before-close: 14
-          exempt-issue-labels: pinned,security,nightly
-          exempt-pr-labels: pinned,security
-          stale-issue-message: This issue has had no activity for 45 days. Comment to keep it open.
-          stale-pr-message: This pull request has had no activity for 45 days. Comment or push to keep it open.
+          exempt-issue-labels: 'pinned,security,nightly'
+          exempt-pr-labels: 'pinned,security'
+          stale-issue-message: >-
+            This issue has had no activity for 45 days. Comment to keep it open,
+            otherwise it closes in 14 days.
+          stale-pr-message: >-
+            This pull request has had no activity for 45 days. Comment or push to keep it
+            open, otherwise it closes in 14 days.
           operations-per-run: 100

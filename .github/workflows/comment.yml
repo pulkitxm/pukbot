@@ -1,5 +1,5 @@
 name: Comment
-run-name: Pukbot comment ${{ inputs.request_id }}
+run-name: Gitbot comment ${{ inputs.request_id }}
 
 on:
   workflow_dispatch:
@@ -70,7 +70,7 @@ jobs:
           test -z "${REQUESTER}" || test "${REQUESTER}" = "${ACTOR}"
           test -n "${BODY//[[:space:]]/}"
           test "${#BODY}" -le 40000
-          footer='_Automated comment posted by Pukbot from an agent-assisted workflow._'
+          footer='*Automated comment posted by Gitbot from an agent-assisted workflow.*'
           attribution="from: @${ACTOR}"
           printf '%s' "${BODY}" >body.md
           if ! grep -Fq -- "${footer}" body.md; then
@@ -83,4 +83,4 @@ jobs:
           comment_url=$(gh api --method POST \
             "repos/${OWNER}/${REPOSITORY}/issues/${NUMBER}/comments" \
             --input request.json --jq .html_url)
-          echo "pukbot-comment-url=${comment_url}"
+          echo "gitbot-comment-url=${comment_url}"

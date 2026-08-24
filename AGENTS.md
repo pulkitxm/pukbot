@@ -1,14 +1,14 @@
-# Working on Pukbot
+# Working on Gitbot
 
-Pukbot is a small Rust CLI that dispatches a trusted GitHub Actions workflow
-to post disclosed comments through the Pukbot GitHub App.
+Gitbot is a small Rust CLI that dispatches a trusted GitHub Actions workflow
+to post disclosed comments through the Gitbot GitHub App.
 
 ## Rules
 
 - Keep the GitHub App private key and installation tokens out of the CLI,
   local files, logs, and command output.
 - Keep the command surface small and focused on comments.
-- Publish binaries only through GitHub Releases. Never publish this crate to Cargo.
+- Publish binaries through GitHub Releases and the crate through crates.io.
 - Do not add comments to tracked code or workflow files.
 - Never use the em-dash character.
 - Use conventional commit subjects and checkpoint commits.

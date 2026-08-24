@@ -21,24 +21,24 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            artifact: pukbot-linux-x86_64
-            binary: pukbot
+            artifact: gitbot-linux-x86_64
+            binary: gitbot
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            artifact: pukbot-linux-aarch64
-            binary: pukbot
+            artifact: gitbot-linux-aarch64
+            binary: gitbot
           - os: macos-15-intel
             target: x86_64-apple-darwin
-            artifact: pukbot-macos-x86_64
-            binary: pukbot
+            artifact: gitbot-macos-x86_64
+            binary: gitbot
           - os: macos-14
             target: aarch64-apple-darwin
-            artifact: pukbot-macos-aarch64
-            binary: pukbot
+            artifact: gitbot-macos-aarch64
+            binary: gitbot
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: pukbot-windows-x86_64.exe
-            binary: pukbot.exe
+            artifact: gitbot-windows-x86_64.exe
+            binary: gitbot.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -103,13 +103,13 @@ jobs:
           merge-multiple: true
       - name: Generate checksums
         working-directory: dist
-        run: sha256sum pukbot-* >SHA256SUMS
+        run: sha256sum gitbot-* >SHA256SUMS
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" dist/* \
             --repo "${GITHUB_REPOSITORY}" \
-            --title "Pukbot ${GITHUB_REF_NAME}" \
+            --title "Gitbot ${GITHUB_REF_NAME}" \
             --generate-notes \
             --verify-tag

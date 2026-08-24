@@ -15,7 +15,7 @@ The update sequence is fixed:
 2. Parse the stable semantic version tag.
 3. Select the release asset for the current operating system and architecture.
 4. Download the release checksum document and binary with size limits and a
-   30-second network timeout.
+  30-second network timeout.
 5. Require exactly one valid SHA-256 entry for the selected asset.
 6. Verify the binary before touching the installed executable.
 7. Preserve executable permissions and replace the resolved executable.

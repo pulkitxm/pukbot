@@ -185,8 +185,28 @@ fn asset_for(os: &str, arch: &str) -> Result<&'static str> {
 }
 
 fn running_executable() -> Result<PathBuf> {
-    std::env::current_exe()
-        .context("failed to locate running Pukbot executable")?
+    let invocation = std::env::args_os()
+        .next()
+        .context("running Pukbot executable has no invocation path")?;
+    let path = PathBuf::from(invocation);
+    let candidate = if path.components().count() > 1 {
+        if path.is_absolute() {
+            path
+        } else {
+            std::env::current_dir()
+                .context("failed to resolve the current directory")?
+                .join(path)
+        }
+    } else {
+        std::env::var_os("PATH")
+            .and_then(|paths| {
+                std::env::split_paths(&paths)
+                    .map(|directory| directory.join(&path))
+                    .find(|candidate| candidate.is_file())
+            })
+            .context("failed to locate running Pukbot executable in PATH")?
+    };
+    candidate
         .canonicalize()
         .context("failed to resolve running Pukbot executable")
 }

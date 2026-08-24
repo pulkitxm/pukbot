@@ -37,6 +37,7 @@ jobs:
           private-key: ${{ secrets.PUKBOT_PRIVATE_KEY }}
           owner: ${{ fromJSON(inputs.payload).owner }}
           repositories: ${{ fromJSON(inputs.payload).repository }}
+          permission-contents: write
           permission-issues: write
           permission-pull-requests: write
       - name: Execute typed operation
@@ -91,6 +92,109 @@ jobs:
                 "repos/${slug}/issues/comments/${comment_id}/reactions" \
                 --input request.json >/dev/null
               result=$(gh api "repos/${slug}/issues/comments/${comment_id}" --jq .html_url)
+              ;;
+            issue_create)
+              jq '{title, body, labels, assignees} | with_entries(select(.value != null))' payload.json >request.json
+              result=$(gh api --method POST "repos/${slug}/issues" --input request.json --jq .html_url)
+              ;;
+            issue_edit)
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              jq '{title, body} | with_entries(select(.value != null))' payload.json >request.json
+              result=$(gh api --method PATCH "repos/${slug}/issues/${number}" --input request.json --jq .html_url)
+              ;;
+            issue_close | issue_reopen)
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              state=open
+              if [ "${operation}" = issue_close ]; then state=closed; fi
+              jq -n --arg state "${state}" '{state: $state}' >request.json
+              result=$(gh api --method PATCH "repos/${slug}/issues/${number}" --input request.json --jq .html_url)
+              ;;
+            issue_labels | pull_request_labels)
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              jq '{labels: .add}' payload.json >request.json
+              if [ "$(jq '.labels | length' request.json)" -gt 0 ]; then
+                gh api --method POST "repos/${slug}/issues/${number}/labels" --input request.json >/dev/null
+              fi
+              jq -r '.remove[]' payload.json | while IFS= read -r label; do
+                encoded=$(jq -rn --arg value "${label}" '$value | @uri')
+                gh api --method DELETE "repos/${slug}/issues/${number}/labels/${encoded}" >/dev/null
+              done
+              resource=issues
+              if [ "${operation}" = pull_request_labels ]; then resource=pull; fi
+              result="https://github.com/${slug}/${resource}/${number}"
+              ;;
+            issue_assignees | pull_request_assignees)
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              jq '{assignees: .add}' payload.json >request.json
+              if [ "$(jq '.assignees | length' request.json)" -gt 0 ]; then
+                gh api --method POST "repos/${slug}/issues/${number}/assignees" --input request.json >/dev/null
+              fi
+              jq '{assignees: .remove}' payload.json >request.json
+              if [ "$(jq '.assignees | length' request.json)" -gt 0 ]; then
+                gh api --method DELETE "repos/${slug}/issues/${number}/assignees" --input request.json >/dev/null
+              fi
+              resource=issues
+              if [ "${operation}" = pull_request_assignees ]; then resource=pull; fi
+              result="https://github.com/${slug}/${resource}/${number}"
+              ;;
+            issue_react | pull_request_react)
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              reaction=$(jq -er \
+                '.reaction | select(
+                  . == "+1" or . == "-1" or . == "laugh" or . == "confused" or
+                  . == "heart" or . == "hooray" or . == "rocket" or . == "eyes"
+                )' \
+                payload.json)
+              jq -n --arg content "${reaction}" '{content: $content}' >request.json
+              gh api --method POST \
+                -H 'Accept: application/vnd.github+json' \
+                "repos/${slug}/issues/${number}/reactions" \
+                --input request.json >/dev/null
+              resource=issues
+              if [ "${operation}" = pull_request_react ]; then resource=pull; fi
+              result="https://github.com/${slug}/${resource}/${number}"
+              ;;
+            pull_request_create)
+              jq '{title, body, head, base, draft} | with_entries(select(.value != null))' payload.json >request.json
+              result=$(gh api --method POST "repos/${slug}/pulls" --input request.json --jq .html_url)
+              ;;
+            pull_request_edit)
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              jq '{title, body, base} | with_entries(select(.value != null))' payload.json >request.json
+              result=$(gh api --method PATCH "repos/${slug}/pulls/${number}" --input request.json --jq .html_url)
+              ;;
+            pull_request_close | pull_request_reopen)
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              state=open
+              if [ "${operation}" = pull_request_close ]; then state=closed; fi
+              jq -n --arg state "${state}" '{state: $state}' >request.json
+              result=$(gh api --method PATCH "repos/${slug}/pulls/${number}" --input request.json --jq .html_url)
+              ;;
+            pull_request_merge)
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              jq -n '{merge_method: "squash"}' >request.json
+              gh api --method PUT "repos/${slug}/pulls/${number}/merge" --input request.json >/dev/null
+              result="https://github.com/${slug}/pull/${number}"
+              ;;
+            pull_request_ready | pull_request_draft)
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              if [ "${operation}" = pull_request_draft ]; then
+                gh pr ready "${number}" --repo "${slug}" --undo >/dev/null
+              else
+                gh pr ready "${number}" --repo "${slug}" >/dev/null
+              fi
+              result="https://github.com/${slug}/pull/${number}"
+              ;;
+            pull_request_review)
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              jq '{event: (.event | ascii_upcase), body} | with_entries(select(.value != null))' payload.json >request.json
+              gh api --method POST "repos/${slug}/pulls/${number}/reviews" --input request.json >/dev/null
+              result="https://github.com/${slug}/pull/${number}"
+              ;;
+            pull_request_update_branch)
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              gh api --method PUT "repos/${slug}/pulls/${number}/update-branch" --input <(jq -n '{}') >/dev/null
+              result="https://github.com/${slug}/pull/${number}"
               ;;
             *)
               printf 'unsupported operation: %s\n' "${operation}" >&2

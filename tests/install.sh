@@ -1,5 +1,5 @@
 #!/bin/sh
-# shellcheck disable=SC2016
+# shellcheck disable=SC2016,SC2310,SC2312
 
 set -eu
 

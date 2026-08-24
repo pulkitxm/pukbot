@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck disable=SC2310,SC2312
 
 set -eu
 umask 077
@@ -167,10 +168,10 @@ else
 fi
 
 has curl || fail "curl is required"
-curl --proto '=https' --tlsv1.2 -LsSf "${RELEASE_URL}/${ASSET}" -o "${TEMP_DIR}/${ASSET}" \
-    || fail "release download failed"
-curl --proto '=https' --tlsv1.2 -LsSf "${RELEASE_URL}/SHA256SUMS" -o "${TEMP_DIR}/SHA256SUMS" \
-    || fail "checksum download failed"
+curl --proto '=https' --tlsv1.2 -LsSf "${RELEASE_URL}/${ASSET}" -o "${TEMP_DIR}/${ASSET}" ||
+    fail "release download failed"
+curl --proto '=https' --tlsv1.2 -LsSf "${RELEASE_URL}/SHA256SUMS" -o "${TEMP_DIR}/SHA256SUMS" ||
+    fail "checksum download failed"
 
 EXPECTED_CHECKSUM=$(awk -v asset="${ASSET}" '
     {

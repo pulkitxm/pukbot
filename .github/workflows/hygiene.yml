@@ -1,0 +1,150 @@
+name: Hygiene
+
+on:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hygiene-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  repository:
+    name: Repository rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: No em dash
+        run: |
+          set -euo pipefail
+          dash=$(printf '\342\200\224')
+          if git grep -n "${dash}"; then exit 1; fi
+      - name: No debug markers
+        run: |
+          set -euo pipefail
+          if git grep -nE '\b(dbg!|todo!|unimplemented!|FIXME|XXX[^X]|eprintln!)' -- 'src/**/*.rs'; then exit 1; fi
+      - name: No large files
+        run: |
+          set -euo pipefail
+          oversized=$(git ls-files -z | xargs -0 -r -I{} find {} -size +512k -print)
+          test -z "${oversized}"
+      - name: Text files end with a newline
+        run: |
+          set -euo pipefail
+          rc=0
+          while IFS= read -r -d '' file; do
+            case "${file}" in
+              *.png | *.jpg | *.jpeg | *.gif | *.ico | *.pdf) continue ;;
+            esac
+            if [ -s "${file}" ] && [ -n "$(tail -c 1 "${file}")" ]; then
+              echo "${file}" >&2
+              rc=1
+            fi
+          done < <(git ls-files -z)
+          exit "${rc}"
+
+  spelling:
+    name: Spelling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: crate-ci/typos@8a48f81b6c64dcfea44b3633223084c4be58ac5f
+
+  editorconfig:
+    name: EditorConfig
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780
+        with:
+          tool: editorconfig-checker
+      - run: editorconfig-checker
+
+  toml:
+    name: TOML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780
+        with:
+          tool: taplo-cli
+      - run: taplo fmt --check --diff Cargo.toml deny.toml typos.toml
+      - run: taplo lint Cargo.toml deny.toml typos.toml
+
+  shell:
+    name: Shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780
+        with:
+          tool: shellcheck,shfmt
+      - run: shellcheck --severity=style --enable=all install.sh tests/install.sh
+      - run: shfmt --diff --indent 4 --case-indent install.sh tests/install.sh
+
+  powershell:
+    name: PowerShell
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Parse installer
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("install.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors | Format-Table; exit 1 }
+
+  workflows:
+    name: Workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: stable
+          cache: false
+      - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -color
+
+  links:
+    name: Links
+    if: github.event_name != 'merge_group'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8
+        with:
+          args: --exclude 'https://crates.io/crates/gitbot' './**/*.md'
+          fail: true
+
+  hygiene:
+    name: Hygiene
+    if: always()
+    needs: [repository, spelling, editorconfig, toml, shell, powershell, workflows, links]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every job
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      - run: echo "Hygiene passed"

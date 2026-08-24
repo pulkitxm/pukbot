@@ -1,27 +1,26 @@
 use std::ffi::OsString;
-use std::fs;
 use std::io::{self, IsTerminal, Read, Write};
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{fs, thread};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
-const WORKFLOW_REPOSITORY: &str = "pulkitxm/Pukbot";
+const WORKFLOW_REPOSITORY: &str = "pulkitxm/Gitbot";
 const WORKFLOW_FILE: &str = "comment.yml";
 const WORKFLOW_REF: &str = "main";
 const MAX_BODY_BYTES: usize = 40_000;
-const FOOTER: &str = "_Automated comment posted by Pukbot from an agent-assisted workflow._";
+const FOOTER: &str = "*Automated comment posted by Gitbot from an agent-assisted workflow.*";
 const RUN_LOOKUP_ATTEMPTS: usize = 30;
 const RUN_POLL_ATTEMPTS: usize = 300;
 
 #[derive(Debug, Parser)]
-#[command(name = "pukbot", version, about)]
+#[command(name = "gitbot", version, about)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -41,6 +40,8 @@ struct CommentArgs {
     body: Option<String>,
     #[arg(long, value_name = "FILE", conflicts_with = "body")]
     body_file: Option<PathBuf>,
+    #[arg(long, value_name = "URL")]
+    image: Vec<String>,
     #[arg(long)]
     dry_run: bool,
 }
@@ -100,7 +101,10 @@ fn main() -> Result<()> {
 }
 
 fn run_comment(args: &CommentArgs) -> Result<()> {
-    let body = read_body(args.body.as_deref(), args.body_file.as_deref())?;
+    let body = append_images(
+        read_body(args.body.as_deref(), args.body_file.as_deref())?,
+        &args.image,
+    )?;
     validate_body(&body)?;
     let requester = github_login()?;
     if args.dry_run {
@@ -192,7 +196,7 @@ fn dispatch_workflow(
     drop(stdin);
     let status = child.wait().context("failed to wait for gh")?;
     if !status.success() {
-        bail!("GitHub rejected the Pukbot workflow dispatch");
+        bail!("GitHub rejected the Gitbot workflow dispatch");
     }
     let run = find_workflow_run(&request_id)?;
     follow_workflow_run(&run)
@@ -206,7 +210,7 @@ fn new_request_id() -> Result<String> {
 }
 
 fn find_workflow_run(request_id: &str) -> Result<WorkflowRun> {
-    let expected_title = format!("Pukbot comment {request_id}");
+    let expected_title = format!("Gitbot comment {request_id}");
     for _ in 0..RUN_LOOKUP_ATTEMPTS {
         let runs = list_workflow_runs()?;
         if let Some(run) = runs
@@ -217,7 +221,7 @@ fn find_workflow_run(request_id: &str) -> Result<WorkflowRun> {
         }
         thread::sleep(Duration::from_secs(1));
     }
-    bail!("could not find the dispatched Pukbot workflow run")
+    bail!("could not find the dispatched Gitbot workflow run")
 }
 
 fn list_workflow_runs() -> Result<Vec<WorkflowRun>> {
@@ -237,11 +241,11 @@ fn list_workflow_runs() -> Result<Vec<WorkflowRun>> {
             "databaseId,displayTitle,status,conclusion,url",
         ])
         .output()
-        .context("failed to list Pukbot workflow runs")?;
+        .context("failed to list Gitbot workflow runs")?;
     if !output.status.success() {
-        bail!("failed to list Pukbot workflow runs");
+        bail!("failed to list Gitbot workflow runs");
     }
-    serde_json::from_slice(&output.stdout).context("failed to decode Pukbot workflow runs")
+    serde_json::from_slice(&output.stdout).context("failed to decode Gitbot workflow runs")
 }
 
 fn follow_workflow_run(run: &WorkflowRun) -> Result<()> {
@@ -256,7 +260,7 @@ fn follow_workflow_run(run: &WorkflowRun) -> Result<()> {
             "--exit-status",
         ])
         .status()
-        .context("failed to watch the Pukbot workflow run")?;
+        .context("failed to watch the Gitbot workflow run")?;
     let completed = if status.success() {
         workflow_run(run.database_id)?
     } else {
@@ -264,12 +268,12 @@ fn follow_workflow_run(run: &WorkflowRun) -> Result<()> {
     };
     if completed.conclusion != "success" {
         show_failed_logs(completed.database_id);
-        bail!("Pukbot workflow failed: {}", completed.url);
+        bail!("Gitbot workflow failed: {}", completed.url);
     }
     if let Some(comment_url) = find_comment_url(completed.database_id)? {
         println!("Comment posted: {comment_url}");
     } else {
-        println!("Pukbot workflow completed successfully");
+        println!("Gitbot workflow completed successfully");
     }
     Ok(())
 }
@@ -287,7 +291,7 @@ fn wait_for_workflow_run(run_id: u64) -> Result<WorkflowRun> {
         }
         thread::sleep(Duration::from_secs(2));
     }
-    bail!("timed out waiting for the Pukbot workflow run")
+    bail!("timed out waiting for the Gitbot workflow run")
 }
 
 fn workflow_run(run_id: u64) -> Result<WorkflowRun> {
@@ -302,11 +306,11 @@ fn workflow_run(run_id: u64) -> Result<WorkflowRun> {
             "databaseId,displayTitle,status,conclusion,url",
         ])
         .output()
-        .context("failed to inspect the Pukbot workflow run")?;
+        .context("failed to inspect the Gitbot workflow run")?;
     if !output.status.success() {
-        bail!("failed to inspect the Pukbot workflow run");
+        bail!("failed to inspect the Gitbot workflow run");
     }
-    serde_json::from_slice(&output.stdout).context("failed to decode the Pukbot workflow run")
+    serde_json::from_slice(&output.stdout).context("failed to decode the Gitbot workflow run")
 }
 
 fn show_failed_logs(run_id: u64) {
@@ -333,7 +337,7 @@ fn find_comment_url(run_id: u64) -> Result<Option<String>> {
             "--log",
         ])
         .output()
-        .context("failed to read Pukbot workflow logs")?;
+        .context("failed to read Gitbot workflow logs")?;
     if !output.status.success() {
         return Ok(None);
     }
@@ -343,7 +347,7 @@ fn find_comment_url(run_id: u64) -> Result<Option<String>> {
 
 fn parse_comment_url(logs: &str) -> Option<String> {
     logs.lines().find_map(|line| {
-        line.split_once("pukbot-comment-url=")
+        line.split_once("gitbot-comment-url=")
             .map(|(_, url)| url.trim().to_owned())
     })
 }
@@ -365,30 +369,45 @@ fn is_repository_character(character: char) -> bool {
     character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
 }
 
+fn append_images(mut body: String, images: &[String]) -> Result<String> {
+    for image in images {
+        if !(image.starts_with("https://") || image.starts_with("http://")) {
+            bail!("image must be an HTTP or HTTPS URL");
+        }
+        if image.contains(['\n', '\r', ')']) {
+            bail!("image URL contains unsupported characters");
+        }
+        body.push_str("\n\n![attachment](");
+        body.push_str(image);
+        body.push(')');
+    }
+    Ok(body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        FOOTER, MAX_BODY_BYTES, Repository, is_repository_character, new_request_id,
+        FOOTER, MAX_BODY_BYTES, Repository, append_images, is_repository_character, new_request_id,
         parse_comment_url, validate_body,
     };
 
     #[test]
     fn parses_repository() {
-        let repository = "pulkitxm/Pukbot".parse::<Repository>();
+        let repository = "pulkitxm/Gitbot".parse::<Repository>();
         assert_eq!(
             repository,
             Ok(Repository {
                 owner: "pulkitxm".to_owned(),
-                name: "Pukbot".to_owned(),
+                name: "Gitbot".to_owned(),
             })
         );
     }
 
     #[test]
     fn rejects_invalid_repository() {
-        assert!("Pukbot".parse::<Repository>().is_err());
-        assert!("pulkitxm/Pukbot/extra".parse::<Repository>().is_err());
-        assert!("pulkitxm/Puk bot".parse::<Repository>().is_err());
+        assert!("Gitbot".parse::<Repository>().is_err());
+        assert!("pulkitxm/Gitbot/extra".parse::<Repository>().is_err());
+        assert!("pulkitxm/Git bot".parse::<Repository>().is_err());
     }
 
     #[test]
@@ -421,10 +440,23 @@ mod tests {
 
     #[test]
     fn extracts_comment_url_from_logs() {
-        let logs = "Post comment\tstep\tpukbot-comment-url=https://github.com/owner/repo/pull/1#issuecomment-2";
+        let logs = "Post comment\tstep\tgitbot-comment-url=https://github.com/owner/repo/pull/1#issuecomment-2";
         assert_eq!(
             parse_comment_url(logs),
             Some("https://github.com/owner/repo/pull/1#issuecomment-2".to_owned())
         );
+    }
+
+    #[test]
+    fn appends_image_urls() {
+        let body = append_images(
+            "result".to_owned(),
+            &["https://example.com/result.png".to_owned()],
+        );
+        assert_eq!(
+            body.expect("image URL should be accepted"),
+            "result\n\n![attachment](https://example.com/result.png)"
+        );
+        assert!(append_images("result".to_owned(), &["result.png".to_owned()]).is_err());
     }
 }

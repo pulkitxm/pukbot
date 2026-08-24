@@ -1,11 +1,12 @@
 #!/bin/sh
+# shellcheck disable=SC2310,SC2312
 
 set -eu
 umask 077
 
-REPOSITORY=pulkitxm/Pukbot
-VERSION=${PUKBOT_VERSION:-latest}
-BIN_DIR=${PUKBOT_INSTALL_DIR:-}
+REPOSITORY=pulkitxm/Gitbot
+VERSION=${GITBOT_VERSION:-latest}
+BIN_DIR=${GITBOT_INSTALL_DIR:-}
 
 info() {
     printf 'info: %s\n' "$*"
@@ -22,7 +23,7 @@ has() {
 
 usage() {
     printf '%s\n' \
-        'Install Pukbot from its private GitHub Release.' \
+        'Install Gitbot from GitHub Releases.' \
         '' \
         'Usage: install.sh [OPTIONS]' \
         '' \
@@ -32,8 +33,8 @@ usage() {
         '  -h, --help             Print this help' \
         '' \
         'Environment variables:' \
-        '  PUKBOT_VERSION          Same as --version' \
-        '  PUKBOT_INSTALL_DIR      Same as --bin-dir'
+        '  GITBOT_VERSION          Same as --version' \
+        '  GITBOT_INSTALL_DIR      Same as --bin-dir'
 }
 
 require_value() {
@@ -71,8 +72,6 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
-
-has gh || fail "GitHub CLI is required"
 
 if [ -z "${BIN_DIR}" ]; then
     if [ -n "${XDG_BIN_HOME:-}" ]; then
@@ -114,26 +113,26 @@ ARCH=$(uname -m 2>/dev/null) || fail "could not identify the CPU architecture"
 case "${OS}" in
     Darwin)
         case "${ARCH}" in
-            x86_64 | amd64) ASSET=pukbot-macos-x86_64 ;;
-            arm64 | aarch64) ASSET=pukbot-macos-aarch64 ;;
-            *) fail "Pukbot does not publish a macOS release for architecture '${ARCH}'" ;;
+            x86_64 | amd64) ASSET=gitbot-macos-x86_64 ;;
+            arm64 | aarch64) ASSET=gitbot-macos-aarch64 ;;
+            *) fail "Gitbot does not publish a macOS release for architecture '${ARCH}'" ;;
         esac
-        BINARY_NAME=pukbot
+        BINARY_NAME=gitbot
         ;;
     Linux)
         case "${ARCH}" in
-            x86_64 | amd64) ASSET=pukbot-linux-x86_64 ;;
-            arm64 | aarch64) ASSET=pukbot-linux-aarch64 ;;
-            *) fail "Pukbot does not publish a Linux release for architecture '${ARCH}'" ;;
+            x86_64 | amd64) ASSET=gitbot-linux-x86_64 ;;
+            arm64 | aarch64) ASSET=gitbot-linux-aarch64 ;;
+            *) fail "Gitbot does not publish a Linux release for architecture '${ARCH}'" ;;
         esac
-        BINARY_NAME=pukbot
+        BINARY_NAME=gitbot
         ;;
     MINGW* | MSYS* | CYGWIN*)
         case "${ARCH}" in
-            x86_64 | amd64) ASSET=pukbot-windows-x86_64.exe ;;
-            *) fail "Pukbot does not publish a Windows release for architecture '${ARCH}'" ;;
+            x86_64 | amd64) ASSET=gitbot-windows-x86_64.exe ;;
+            *) fail "Gitbot does not publish a Windows release for architecture '${ARCH}'" ;;
         esac
-        BINARY_NAME=pukbot.exe
+        BINARY_NAME=gitbot.exe
         ;;
     *)
         fail "unsupported operating system: ${OS}"
@@ -148,7 +147,7 @@ else
     fail "sha256sum or shasum is required"
 fi
 
-TEMP_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t pukbot) || fail "could not create a temporary directory"
+TEMP_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t gitbot) || fail "could not create a temporary directory"
 
 cleanup() {
     rm -rf "${TEMP_DIR}"
@@ -156,21 +155,23 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 info "detected ${OS} ${ARCH}"
-info "downloading Pukbot ${VERSION_LABEL}"
+info "downloading Gitbot ${VERSION_LABEL}"
 
 if [ -n "${RELEASE_TAG}" ]; then
-    gh release download "${RELEASE_TAG}" \
-        --repo "${REPOSITORY}" \
-        --pattern "${ASSET}" \
-        --pattern SHA256SUMS \
-        --dir "${TEMP_DIR}" || fail "release download failed"
+    RELEASE_URL=https://github.com/${REPOSITORY}/releases/download/${RELEASE_TAG}
 else
-    gh release download \
-        --repo "${REPOSITORY}" \
-        --pattern "${ASSET}" \
-        --pattern SHA256SUMS \
-        --dir "${TEMP_DIR}" || fail "release download failed"
+    has curl || fail "curl is required"
+    RELEASE_TAG=$(curl --proto '=https' --tlsv1.2 -LsSf -o /dev/null -w '%{url_effective}' \
+        "https://github.com/${REPOSITORY}/releases/latest" | awk -F/ '{print $NF}')
+    [ -n "${RELEASE_TAG}" ] || fail "could not resolve the latest release"
+    RELEASE_URL=https://github.com/${REPOSITORY}/releases/download/${RELEASE_TAG}
 fi
+
+has curl || fail "curl is required"
+curl --proto '=https' --tlsv1.2 -LsSf "${RELEASE_URL}/${ASSET}" -o "${TEMP_DIR}/${ASSET}" ||
+    fail "release download failed"
+curl --proto '=https' --tlsv1.2 -LsSf "${RELEASE_URL}/SHA256SUMS" -o "${TEMP_DIR}/SHA256SUMS" ||
+    fail "checksum download failed"
 
 EXPECTED_CHECKSUM=$(awk -v asset="${ASSET}" '
     {
@@ -201,7 +202,7 @@ info "verified SHA-256 checksum"
 
 mkdir -p "${BIN_DIR}" || fail "could not create ${BIN_DIR}"
 install -m 0755 "${TEMP_DIR}/${ASSET}" "${BIN_DIR}/${BINARY_NAME}" || fail "installation failed"
-info "installed Pukbot to ${BIN_DIR}/${BINARY_NAME}"
+info "installed Gitbot to ${BIN_DIR}/${BINARY_NAME}"
 
 case ":${PATH:-}:" in
     *:"${BIN_DIR}":*) ;;

@@ -1,0 +1,15 @@
+rust:
+  - changed-files:
+      - any-glob-to-any-file: ['src/**/*.rs', 'Cargo.toml', 'Cargo.lock']
+documentation:
+  - changed-files:
+      - any-glob-to-any-file: ['**/*.md', 'docs/**']
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ['.github/**']
+installer:
+  - changed-files:
+      - any-glob-to-any-file: ['install.sh', 'install.ps1', 'tests/install.sh']
+security:
+  - changed-files:
+      - any-glob-to-any-file: ['SECURITY.md', 'deny.toml', '.github/workflows/security.yml']

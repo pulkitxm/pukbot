@@ -1,0 +1,3 @@
+exclude = ["https://gitbot.pulkit.page", "https://github.com/apps/pulkit-gitbot"]
+max_retries = 3
+timeout = 20

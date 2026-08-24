@@ -1,0 +1,42 @@
+name: Wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/wiki.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Publish wiki
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Publish pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          wiki="${RUNNER_TEMP}/wiki"
+          git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" "${wiki}"
+          find "${wiki}" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp docs/*.md "${wiki}/"
+          git -C "${wiki}" config user.name 'github-actions[bot]'
+          git -C "${wiki}" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "${wiki}" add .
+          if git -C "${wiki}" diff --cached --quiet; then exit 0; fi
+          git -C "${wiki}" commit -m 'docs: sync wiki'
+          git -C "${wiki}" push origin master

@@ -79,9 +79,17 @@ jobs:
               ;;
             comment_react)
               comment_id=$(jq -er '.comment_id | select(. >= 1)' payload.json)
-              reaction=$(jq -er '.reaction | select(. == "+1" or . == "-1" or . == "laugh" or . == "confused" or . == "heart" or . == "hooray" or . == "rocket" or . == "eyes")' payload.json)
+              reaction=$(jq -er \
+                '.reaction | select(
+                  . == "+1" or . == "-1" or . == "laugh" or . == "confused" or
+                  . == "heart" or . == "hooray" or . == "rocket" or . == "eyes"
+                )' \
+                payload.json)
               jq -n --arg content "${reaction}" '{content: $content}' >request.json
-              gh api --method POST -H 'Accept: application/vnd.github+json' "repos/${slug}/issues/comments/${comment_id}/reactions" --input request.json >/dev/null
+              gh api --method POST \
+                -H 'Accept: application/vnd.github+json' \
+                "repos/${slug}/issues/comments/${comment_id}/reactions" \
+                --input request.json >/dev/null
               result=$(gh api "repos/${slug}/issues/comments/${comment_id}" --jq .html_url)
               ;;
             *)

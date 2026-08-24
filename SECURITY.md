@@ -13,7 +13,7 @@ Security fixes are applied to the latest published release and `main`.
 ## Reporting a Vulnerability
 
 Do not open a public issue for a suspected vulnerability. Use GitHub's
-[private vulnerability reporting form](https://github.com/pulkitxm/gitbot/security/advisories/new).
+[private vulnerability reporting form](https://github.com/pulkitxm/pukbot/security/advisories/new).
 
 Include the affected version and platform, reproduction steps, expected and
 observed behavior, potential impact, and suggested mitigation. Remove
@@ -22,7 +22,7 @@ credentials, private repository contents, and personal data.
 ## Security Model
 
 The CLI invokes GitHub CLI directly with argument arrays. It does not read or
-store the Gitbot App private key, installation tokens, or crates.io publishing
+store the Pukbot App private key, installation tokens, or crates.io publishing
 credentials.
 
 Local images are validated by file signature, limited to 10 MiB, assigned a

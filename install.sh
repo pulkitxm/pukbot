@@ -4,9 +4,9 @@
 set -eu
 umask 077
 
-REPOSITORY=pulkitxm/gitbot
-VERSION=${GITBOT_VERSION:-latest}
-BIN_DIR=${GITBOT_INSTALL_DIR:-}
+REPOSITORY=pulkitxm/pukbot
+VERSION=${PUKBOT_VERSION:-latest}
+BIN_DIR=${PUKBOT_INSTALL_DIR:-}
 
 info() {
     printf 'info: %s\n' "$*"
@@ -23,7 +23,7 @@ has() {
 
 usage() {
     printf '%s\n' \
-        'Install Gitbot from GitHub Releases.' \
+        'Install Pukbot from GitHub Releases.' \
         '' \
         'Usage: install.sh [OPTIONS]' \
         '' \
@@ -33,8 +33,8 @@ usage() {
         '  -h, --help             Print this help' \
         '' \
         'Environment variables:' \
-        '  GITBOT_VERSION          Same as --version' \
-        '  GITBOT_INSTALL_DIR      Same as --bin-dir'
+        '  PUKBOT_VERSION          Same as --version' \
+        '  PUKBOT_INSTALL_DIR      Same as --bin-dir'
 }
 
 require_value() {
@@ -113,26 +113,26 @@ ARCH=$(uname -m 2>/dev/null) || fail "could not identify the CPU architecture"
 case "${OS}" in
     Darwin)
         case "${ARCH}" in
-            x86_64 | amd64) ASSET=gitbot-macos-x86_64 ;;
-            arm64 | aarch64) ASSET=gitbot-macos-aarch64 ;;
-            *) fail "Gitbot does not publish a macOS release for architecture '${ARCH}'" ;;
+            x86_64 | amd64) ASSET=pukbot-macos-x86_64 ;;
+            arm64 | aarch64) ASSET=pukbot-macos-aarch64 ;;
+            *) fail "Pukbot does not publish a macOS release for architecture '${ARCH}'" ;;
         esac
-        BINARY_NAME=gitbot
+        BINARY_NAME=pukbot
         ;;
     Linux)
         case "${ARCH}" in
-            x86_64 | amd64) ASSET=gitbot-linux-x86_64 ;;
-            arm64 | aarch64) ASSET=gitbot-linux-aarch64 ;;
-            *) fail "Gitbot does not publish a Linux release for architecture '${ARCH}'" ;;
+            x86_64 | amd64) ASSET=pukbot-linux-x86_64 ;;
+            arm64 | aarch64) ASSET=pukbot-linux-aarch64 ;;
+            *) fail "Pukbot does not publish a Linux release for architecture '${ARCH}'" ;;
         esac
-        BINARY_NAME=gitbot
+        BINARY_NAME=pukbot
         ;;
     MINGW* | MSYS* | CYGWIN*)
         case "${ARCH}" in
-            x86_64 | amd64) ASSET=gitbot-windows-x86_64.exe ;;
-            *) fail "Gitbot does not publish a Windows release for architecture '${ARCH}'" ;;
+            x86_64 | amd64) ASSET=pukbot-windows-x86_64.exe ;;
+            *) fail "Pukbot does not publish a Windows release for architecture '${ARCH}'" ;;
         esac
-        BINARY_NAME=gitbot.exe
+        BINARY_NAME=pukbot.exe
         ;;
     *)
         fail "unsupported operating system: ${OS}"
@@ -147,7 +147,7 @@ else
     fail "sha256sum or shasum is required"
 fi
 
-TEMP_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t gitbot) || fail "could not create a temporary directory"
+TEMP_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t pukbot) || fail "could not create a temporary directory"
 
 cleanup() {
     rm -rf "${TEMP_DIR}"
@@ -155,7 +155,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 info "detected ${OS} ${ARCH}"
-info "downloading Gitbot ${VERSION_LABEL}"
+info "downloading Pukbot ${VERSION_LABEL}"
 
 if [ -n "${RELEASE_TAG}" ]; then
     RELEASE_URL=https://github.com/${REPOSITORY}/releases/download/${RELEASE_TAG}
@@ -202,7 +202,7 @@ info "verified SHA-256 checksum"
 
 mkdir -p "${BIN_DIR}" || fail "could not create ${BIN_DIR}"
 install -m 0755 "${TEMP_DIR}/${ASSET}" "${BIN_DIR}/${BINARY_NAME}" || fail "installation failed"
-info "installed Gitbot to ${BIN_DIR}/${BINARY_NAME}"
+info "installed Pukbot to ${BIN_DIR}/${BINARY_NAME}"
 
 case ":${PATH:-}:" in
     *:"${BIN_DIR}":*) ;;

@@ -1,4 +1,4 @@
-# Contributing to Gitbot
+# Contributing to Pukbot
 
 Bug reports, design feedback, documentation, tests, and code are welcome.
 
@@ -11,11 +11,11 @@ Bug reports, design feedback, documentation, tests, and code are welcome.
 
 ## Development Setup
 
-Gitbot requires Rust 1.85 or newer and GitHub CLI.
+Pukbot requires Rust 1.85 or newer and GitHub CLI.
 
 ```bash
-git clone https://github.com/pulkitxm/gitbot.git
-cd Gitbot
+git clone https://github.com/pulkitxm/pukbot.git
+cd Pukbot
 cargo test --locked
 ```
 

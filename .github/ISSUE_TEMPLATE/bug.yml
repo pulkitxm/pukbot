@@ -15,7 +15,7 @@ body:
       required: true
   - type: input
     attributes:
-      label: Gitbot version
+      label: Pukbot version
     validations:
       required: true
   - type: input

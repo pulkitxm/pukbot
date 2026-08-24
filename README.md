@@ -50,7 +50,35 @@ permission to dispatch the Comment workflow in `pulkitxm/Pukbot`.
 
 ## Installation
 
-Download the binary for your platform from
+On Linux or macOS, install the latest private release with your authenticated
+GitHub CLI session:
+
+```bash
+printf 'header = "Authorization: Bearer %s"\n' "$(gh auth token)" \
+  | curl --proto '=https' --tlsv1.2 -LsSf --config - \
+    -H 'Accept: application/vnd.github.raw' \
+    -H 'X-GitHub-Api-Version: 2022-11-28' \
+    https://api.github.com/repos/pulkitxm/Pukbot/contents/install.sh \
+  | sh
+```
+
+The installer detects the operating system and CPU architecture, downloads the
+matching binary from the latest GitHub Release, verifies its SHA-256 checksum,
+and installs it to `$XDG_BIN_HOME` or `~/.local/bin`. It requires an
+authenticated GitHub CLI because the repository and its releases are private.
+
+Pass `--version` or `--bin-dir` to select a release or destination:
+
+```bash
+printf 'header = "Authorization: Bearer %s"\n' "$(gh auth token)" \
+  | curl --proto '=https' --tlsv1.2 -LsSf --config - \
+    -H 'Accept: application/vnd.github.raw' \
+    -H 'X-GitHub-Api-Version: 2022-11-28' \
+    https://api.github.com/repos/pulkitxm/Pukbot/contents/install.sh \
+  | sh -s -- --version v0.1.0 --bin-dir "$HOME/.local/bin"
+```
+
+You can also download a binary manually from
 [GitHub Releases](https://github.com/pulkitxm/Pukbot/releases), verify it
 against `SHA256SUMS`, make it executable on Unix, and place it on `PATH`.
 

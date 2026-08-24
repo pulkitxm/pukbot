@@ -1,0 +1,127 @@
+#!/bin/sh
+# shellcheck disable=SC2016
+
+set -eu
+
+ROOT=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
+INSTALLER=${ROOT}/install.sh
+TEST_ROOT=$(mktemp -d 2>/dev/null || mktemp -d -t pukbot-tests)
+FIXTURES=${TEST_ROOT}/fixtures
+FAKE_BIN=${TEST_ROOT}/bin
+ORIGINAL_PATH=${PATH}
+
+cleanup() {
+    rm -rf "${TEST_ROOT}"
+}
+trap cleanup EXIT HUP INT TERM
+
+mkdir -p "${FIXTURES}" "${FAKE_BIN}"
+
+fail() {
+    printf 'FAIL: %s\n' "$*" >&2
+    exit 1
+}
+
+assert_contains() {
+    needle=$1
+    file=$2
+    grep -F "${needle}" "${file}" >/dev/null 2>&1 || fail "expected '${needle}' in ${file}"
+}
+
+assert_equals() {
+    expected=$1
+    actual=$2
+    [ "${expected}" = "${actual}" ] || fail "expected '${expected}', got '${actual}'"
+}
+
+sha256() {
+    file=$1
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "${file}" | awk '{print $1}'
+    else
+        shasum -a 256 "${file}" | awk '{print $1}'
+    fi
+}
+
+prepare_release() {
+    asset=$1
+    contents=$2
+    printf '%s' "${contents}" >"${FIXTURES}/${asset}"
+    printf '%s  %s\n' "$(sha256 "${FIXTURES}/${asset}")" "${asset}" >"${FIXTURES}/SHA256SUMS"
+}
+
+printf '%s\n' '#!/bin/sh' \
+    'case "${1:-}" in' \
+    '    -s) printf "%s\n" "$PUKBOT_TEST_OS" ;;' \
+    '    -m) printf "%s\n" "$PUKBOT_TEST_ARCH" ;;' \
+    '    *) exit 2 ;;' \
+    'esac' >"${FAKE_BIN}/uname"
+
+printf '%s\n' '#!/bin/sh' \
+    'set -eu' \
+    'destination=' \
+    'while [ "$#" -gt 0 ]; do' \
+    '    case "$1" in' \
+    '        --dir) destination=$2; shift 2 ;;' \
+    '        *) shift ;;' \
+    '    esac' \
+    'done' \
+    '[ -n "${destination}" ]' \
+    'cp "$PUKBOT_TEST_FIXTURES/$PUKBOT_TEST_ASSET" "${destination}/$PUKBOT_TEST_ASSET"' \
+    'cp "$PUKBOT_TEST_FIXTURES/SHA256SUMS" "${destination}/SHA256SUMS"' >"${FAKE_BIN}/gh"
+
+chmod +x "${FAKE_BIN}/uname" "${FAKE_BIN}/gh"
+
+run_installer() {
+    test_home=$1
+    test_os=$2
+    test_arch=$3
+    test_asset=$4
+    shift 4
+    mkdir -p "${test_home}"
+    env \
+        HOME="${test_home}" \
+        PATH="${FAKE_BIN}:${ORIGINAL_PATH}" \
+        PUKBOT_TEST_OS="${test_os}" \
+        PUKBOT_TEST_ARCH="${test_arch}" \
+        PUKBOT_TEST_ASSET="${test_asset}" \
+        PUKBOT_TEST_FIXTURES="${FIXTURES}" \
+        sh "${INSTALLER}" "$@"
+}
+
+printf 'test: installs a pinned Linux x86-64 release\n'
+case_dir=${TEST_ROOT}/linux-x86
+bin_dir=${case_dir}/bin
+prepare_release pukbot-linux-x86_64 'linux x86 binary'
+run_installer "${case_dir}/home" Linux x86_64 pukbot-linux-x86_64 \
+    --version 0.1.0 --bin-dir "${bin_dir}" >"${case_dir}.out" 2>&1
+assert_equals 'linux x86 binary' "$(cat "${bin_dir}/pukbot")"
+[ -x "${bin_dir}/pukbot" ] || fail "installed binary is not executable"
+assert_contains 'verified SHA-256 checksum' "${case_dir}.out"
+
+printf 'test: installs the latest macOS Apple Silicon release\n'
+case_dir=${TEST_ROOT}/macos-arm
+bin_dir=${case_dir}/bin
+prepare_release pukbot-macos-aarch64 'macOS ARM binary'
+run_installer "${case_dir}/home" Darwin arm64 pukbot-macos-aarch64 \
+    --bin-dir "${bin_dir}" >"${case_dir}.out" 2>&1
+assert_equals 'macOS ARM binary' "$(cat "${bin_dir}/pukbot")"
+
+printf 'test: rejects a checksum mismatch\n'
+case_dir=${TEST_ROOT}/bad-checksum
+bin_dir=${case_dir}/bin
+printf 'tampered binary' >"${FIXTURES}/pukbot-linux-x86_64"
+printf '%064d  pukbot-linux-x86_64\n' 0 >"${FIXTURES}/SHA256SUMS"
+if run_installer "${case_dir}/home" Linux x86_64 pukbot-linux-x86_64 \
+    --bin-dir "${bin_dir}" >"${case_dir}.out" 2>&1; then
+    fail "checksum mismatch unexpectedly succeeded"
+fi
+assert_contains 'checksum verification failed' "${case_dir}.out"
+
+printf 'test: rejects unsupported operating systems\n'
+case_dir=${TEST_ROOT}/unsupported
+if run_installer "${case_dir}/home" FreeBSD x86_64 pukbot-linux-x86_64 \
+    --bin-dir "${case_dir}/bin" >"${case_dir}.out" 2>&1; then
+    fail "unsupported operating system unexpectedly succeeded"
+fi
+assert_contains 'unsupported operating system: FreeBSD' "${case_dir}.out"

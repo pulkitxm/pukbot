@@ -139,9 +139,17 @@ jobs:
               ;;
             issue_react | pull_request_react)
               number=$(jq -er '.number | select(. >= 1)' payload.json)
-              reaction=$(jq -er '.reaction | select(. == "+1" or . == "-1" or . == "laugh" or . == "confused" or . == "heart" or . == "hooray" or . == "rocket" or . == "eyes")' payload.json)
+              reaction=$(jq -er \
+                '.reaction | select(
+                  . == "+1" or . == "-1" or . == "laugh" or . == "confused" or
+                  . == "heart" or . == "hooray" or . == "rocket" or . == "eyes"
+                )' \
+                payload.json)
               jq -n --arg content "${reaction}" '{content: $content}' >request.json
-              gh api --method POST -H 'Accept: application/vnd.github+json' "repos/${slug}/issues/${number}/reactions" --input request.json >/dev/null
+              gh api --method POST \
+                -H 'Accept: application/vnd.github+json' \
+                "repos/${slug}/issues/${number}/reactions" \
+                --input request.json >/dev/null
               resource=issues
               if [ "${operation}" = pull_request_react ]; then resource=pull; fi
               result="https://github.com/${slug}/${resource}/${number}"

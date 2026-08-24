@@ -1,8 +1,8 @@
 # Gitbot
 
-[![CI](https://github.com/pulkitxm/Gitbot/actions/workflows/ci.yml/badge.svg)](https://github.com/pulkitxm/Gitbot/actions/workflows/ci.yml)
+[![CI](https://github.com/pulkitxm/gitbot/actions/workflows/ci.yml/badge.svg)](https://github.com/pulkitxm/gitbot/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/gitbot.svg)](https://crates.io/crates/gitbot)
-[![release](https://img.shields.io/github/v/release/pulkitxm/Gitbot)](https://github.com/pulkitxm/Gitbot/releases)
+[![release](https://img.shields.io/github/v/release/pulkitxm/gitbot)](https://github.com/pulkitxm/gitbot/releases)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Gitbot is a small Rust CLI for posting disclosed GitHub issue and pull request
@@ -57,7 +57,20 @@ gitbot comment 123 --repo owner/repository --body-file comment.md
 gitbot comment 123 --repo owner/repository <comment.md
 ```
 
-Add an image that already has an HTTP or HTTPS URL:
+Add an image from a local path:
+
+```bash
+gitbot comment 123 \
+  --repo owner/repository \
+  --body "the final result" \
+  --image ./result.png
+```
+
+Local PNG, JPEG, GIF, and WebP files up to 10 MiB are uploaded as public assets
+to Gitbot's `comment-assets` prerelease. Do not use this option for secrets or
+private images.
+
+An existing HTTP or HTTPS image URL also works:
 
 ```bash
 gitbot comment 123 \
@@ -66,9 +79,8 @@ gitbot comment 123 \
   --image https://example.com/result.png
 ```
 
-GitHub does not expose its comment attachment uploader through the supported
-REST API. Upload a local image through GitHub first, then pass the generated
-attachment URL with `--image`. Multiple `--image` options are supported.
+Multiple `--image` options are supported. Dry runs validate local images and
+show their final asset URLs without uploading them.
 
 Preview the final comment without dispatching:
 
@@ -90,7 +102,8 @@ The CLI follows the workflow, streams its status, shows failed logs, returns a
 failing exit code on failure, and prints the posted comment URL on success.
 
 GitHub CLI must be installed and authenticated. The authenticated user needs
-permission to dispatch the Comment workflow in `pulkitxm/Gitbot`.
+permission to dispatch the Comment workflow in `pulkitxm/gitbot`. Local image
+uploads also require permission to upload release assets to that repository.
 
 ## Agent instructions
 
@@ -102,8 +115,9 @@ Gitbot. Do not call gh issue comment or gh pr comment directly.
 
 gitbot comment <number> --repo <owner/repository> --body "<message>"
 
-Use --body-file or stdin for multiline comments. Use --image with an existing
-HTTP or HTTPS image URL. Gitbot appends the required disclosure footer.
+Use --body-file or stdin for multiline comments. Use --image with a local PNG,
+JPEG, GIF, or WebP path, or an existing HTTP or HTTPS image URL. Local files are
+uploaded publicly. Gitbot appends the required disclosure footer.
 ```
 
 ## Security

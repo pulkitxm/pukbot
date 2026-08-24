@@ -8,4 +8,7 @@ Installation tokens are short-lived and scoped to one repository. Release
 installers verify SHA-256 checksums. Crate publication uses GitHub OIDC through
 crates.io Trusted Publishing.
 
+Local image paths are uploaded as public release assets. Never attach secrets,
+private repository content, personal data, or other non-public images.
+
 Use GitHub private vulnerability reporting for suspected security problems.

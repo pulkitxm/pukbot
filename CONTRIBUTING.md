@@ -14,7 +14,7 @@ Bug reports, design feedback, documentation, tests, and code are welcome.
 Gitbot requires Rust 1.85 or newer and GitHub CLI.
 
 ```bash
-git clone https://github.com/pulkitxm/Gitbot.git
+git clone https://github.com/pulkitxm/gitbot.git
 cd Gitbot
 cargo test --locked
 ```

@@ -13,7 +13,7 @@ Security fixes are applied to the latest published release and `main`.
 ## Reporting a Vulnerability
 
 Do not open a public issue for a suspected vulnerability. Use GitHub's
-[private vulnerability reporting form](https://github.com/pulkitxm/Gitbot/security/advisories/new).
+[private vulnerability reporting form](https://github.com/pulkitxm/gitbot/security/advisories/new).
 
 Include the affected version and platform, reproduction steps, expected and
 observed behavior, potential impact, and suggested mitigation. Remove
@@ -24,6 +24,11 @@ credentials, private repository contents, and personal data.
 The CLI invokes GitHub CLI directly with argument arrays. It does not read or
 store the Gitbot App private key, installation tokens, or crates.io publishing
 credentials.
+
+Local images are validated by file signature, limited to 10 MiB, assigned a
+content-derived filename, and uploaded through the authenticated GitHub CLI
+session to the public `comment-assets` prerelease. Never attach credentials,
+private repository content, personal data, or other non-public images.
 
 The comment workflow stores the App private key in a protected environment,
 mints a short-lived installation token scoped to one repository, requests only

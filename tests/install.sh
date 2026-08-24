@@ -71,7 +71,7 @@ printf '%s\n' '#!/bin/sh' \
     '    esac' \
     'done' \
     'if [ "${write_url}" = true ]; then' \
-    '    printf "%s\n" "https://github.com/pulkitxm/Gitbot/releases/tag/v0.3.0"' \
+    '    printf "%s\n" "https://github.com/pulkitxm/gitbot/releases/tag/v0.3.0"' \
     '    exit 0' \
     'fi' \
     '[ -n "${destination}" ]' \

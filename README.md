@@ -1,8 +1,8 @@
 # Gitbot
 
-[![CI](https://github.com/pulkitxm/Gitbot/actions/workflows/ci.yml/badge.svg)](https://github.com/pulkitxm/Gitbot/actions/workflows/ci.yml)
+[![CI](https://github.com/pulkitxm/gitbot/actions/workflows/ci.yml/badge.svg)](https://github.com/pulkitxm/gitbot/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/gitbot.svg)](https://crates.io/crates/gitbot)
-[![release](https://img.shields.io/github/v/release/pulkitxm/Gitbot)](https://github.com/pulkitxm/Gitbot/releases)
+[![release](https://img.shields.io/github/v/release/pulkitxm/gitbot)](https://github.com/pulkitxm/gitbot/releases)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Gitbot is a small Rust CLI for posting disclosed GitHub issue and pull request
@@ -90,7 +90,7 @@ The CLI follows the workflow, streams its status, shows failed logs, returns a
 failing exit code on failure, and prints the posted comment URL on success.
 
 GitHub CLI must be installed and authenticated. The authenticated user needs
-permission to dispatch the Comment workflow in `pulkitxm/Gitbot`.
+permission to dispatch the Comment workflow in `pulkitxm/gitbot`.
 
 ## Agent instructions
 

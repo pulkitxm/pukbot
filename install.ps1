@@ -15,7 +15,7 @@ $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol =
     [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-$Repository = "pulkitxm/Gitbot"
+$Repository = "pulkitxm/gitbot"
 $ReleasesUrl = "https://github.com/$Repository/releases"
 
 function Write-Info {

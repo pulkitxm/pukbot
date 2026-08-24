@@ -69,7 +69,7 @@ try {
     Set-ReleaseFixture -Contents "windows binary"
     & $Installer -Version "1.2.3" -BinDir $binDir -NoModifyPath *> (Join-Path $TestRoot "successful-install.log")
     Assert-Equal -Expected "windows binary" -Actual ([IO.File]::ReadAllText((Join-Path $binDir "gitbot.exe"))) -Message "installed binary"
-    Assert-Contains -Needle "https://github.com/pulkitxm/Gitbot/releases/download/v1.2.3/gitbot-windows-x86_64.exe" -Path $DownloadsLog
+    Assert-Contains -Needle "https://github.com/pulkitxm/gitbot/releases/download/v1.2.3/gitbot-windows-x86_64.exe" -Path $DownloadsLog
     Assert-Contains -Needle "verified SHA-256 checksum" -Path (Join-Path $TestRoot "successful-install.log")
 
     Write-Host "test: rejects a checksum mismatch"

@@ -13,7 +13,7 @@ Security fixes are applied to the latest published release and `main`.
 ## Reporting a Vulnerability
 
 Do not open a public issue for a suspected vulnerability. Use GitHub's
-[private vulnerability reporting form](https://github.com/pulkitxm/Gitbot/security/advisories/new).
+[private vulnerability reporting form](https://github.com/pulkitxm/gitbot/security/advisories/new).
 
 Include the affected version and platform, reproduction steps, expected and
 observed behavior, potential impact, and suggested mitigation. Remove

@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
-const WORKFLOW_REPOSITORY: &str = "pulkitxm/Gitbot";
+const WORKFLOW_REPOSITORY: &str = "pulkitxm/gitbot";
 const WORKFLOW_FILE: &str = "comment.yml";
 const WORKFLOW_REF: &str = "main";
 const MAX_BODY_BYTES: usize = 40_000;
@@ -395,12 +395,12 @@ mod tests {
 
     #[test]
     fn parses_repository() {
-        let repository = "pulkitxm/Gitbot".parse::<Repository>();
+        let repository = "pulkitxm/gitbot".parse::<Repository>();
         assert_eq!(
             repository,
             Ok(Repository {
                 owner: "pulkitxm".to_owned(),
-                name: "Gitbot".to_owned(),
+                name: "gitbot".to_owned(),
             })
         );
     }
@@ -408,7 +408,7 @@ mod tests {
     #[test]
     fn rejects_invalid_repository() {
         assert!("Gitbot".parse::<Repository>().is_err());
-        assert!("pulkitxm/Gitbot/extra".parse::<Repository>().is_err());
+        assert!("pulkitxm/gitbot/extra".parse::<Repository>().is_err());
         assert!("pulkitxm/Git bot".parse::<Repository>().is_err());
     }
 

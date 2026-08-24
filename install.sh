@@ -4,7 +4,7 @@
 set -eu
 umask 077
 
-REPOSITORY=pulkitxm/Gitbot
+REPOSITORY=pulkitxm/gitbot
 VERSION=${GITBOT_VERSION:-latest}
 BIN_DIR=${GITBOT_INSTALL_DIR:-}
 

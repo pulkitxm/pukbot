@@ -40,13 +40,13 @@ jobs:
   comment:
     name: Post comment
     runs-on: ubuntu-latest
-    environment: pukbot-production
+    environment: gitbot-production
     steps:
       - id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
-          client-id: ${{ vars.PUKBOT_CLIENT_ID }}
-          private-key: ${{ secrets.PUKBOT_PRIVATE_KEY }}
+          client-id: ${{ vars.GITBOT_CLIENT_ID }}
+          private-key: ${{ secrets.GITBOT_PRIVATE_KEY }}
           owner: ${{ inputs.owner }}
           repositories: ${{ inputs.repository }}
           permission-issues: write

@@ -1,0 +1,68 @@
+name: Comment
+
+on:
+  workflow_dispatch:
+    inputs:
+      owner:
+        description: Repository owner
+        required: true
+        type: string
+      repository:
+        description: Repository name
+        required: true
+        type: string
+      number:
+        description: Issue or pull request number
+        required: true
+        type: string
+      body:
+        description: Comment body
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: comment-${{ inputs.owner }}-${{ inputs.repository }}-${{ inputs.number }}
+  cancel-in-progress: false
+
+jobs:
+  comment:
+    name: Post comment
+    runs-on: ubuntu-latest
+    environment: pukbot-production
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.PUKBOT_CLIENT_ID }}
+          private-key: ${{ secrets.PUKBOT_PRIVATE_KEY }}
+          owner: ${{ inputs.owner }}
+          repositories: ${{ inputs.repository }}
+          permission-issues: write
+          permission-pull-requests: write
+      - name: Post disclosed comment
+        env:
+          BODY: ${{ inputs.body }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          NUMBER: ${{ inputs.number }}
+          OWNER: ${{ inputs.owner }}
+          REPOSITORY: ${{ inputs.repository }}
+        run: |
+          set -euo pipefail
+          [[ "${OWNER}" =~ ^[A-Za-z0-9_.-]+$ ]]
+          [[ "${REPOSITORY}" =~ ^[A-Za-z0-9_.-]+$ ]]
+          [[ "${NUMBER}" =~ ^[1-9][0-9]*$ ]]
+          test -n "${BODY//[[:space:]]/}"
+          test "${#BODY}" -le 40000
+          footer='_Automated comment posted by Pukbot from an agent-assisted workflow._'
+          printf '%s' "${BODY}" >body.md
+          if ! grep -Fq -- "${footer}" body.md; then
+            printf '\n\n---\n\n%s\n' "${footer}" >>body.md
+          fi
+          jq -n --rawfile body body.md '{body: $body}' >request.json
+          gh api --method POST \
+            "repos/${OWNER}/${REPOSITORY}/issues/${NUMBER}/comments" \
+            --input request.json --silent
+          echo "posted Pukbot comment to ${OWNER}/${REPOSITORY}#${NUMBER}"

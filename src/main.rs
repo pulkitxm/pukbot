@@ -13,7 +13,7 @@ use serde::Serialize;
 const WORKFLOW_REPOSITORY: &str = "pulkitxm/Pukbot";
 const WORKFLOW_FILE: &str = "comment.yml";
 const WORKFLOW_REF: &str = "main";
-const MAX_BODY_BYTES: usize = 60_000;
+const MAX_BODY_BYTES: usize = 40_000;
 const FOOTER: &str = "_Automated comment posted by Pukbot from an agent-assisted workflow._";
 
 #[derive(Debug, Parser)]

@@ -1,0 +1,100 @@
+name: Operation
+run-name: Pukbot operation ${{ inputs.request_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      payload:
+        description: Typed operation JSON
+        required: true
+        type: string
+      requester:
+        description: Authenticated requester
+        required: true
+        type: string
+      request_id:
+        description: CLI request identifier
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: operation-${{ inputs.request_id }}
+  cancel-in-progress: false
+
+jobs:
+  operation:
+    name: Execute operation
+    runs-on: ubuntu-latest
+    environment: pukbot-production
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.PUKBOT_CLIENT_ID }}
+          private-key: ${{ secrets.PUKBOT_PRIVATE_KEY }}
+          owner: ${{ fromJSON(inputs.payload).owner }}
+          repositories: ${{ fromJSON(inputs.payload).repository }}
+          permission-issues: write
+          permission-pull-requests: write
+      - name: Execute typed operation
+        env:
+          ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PAYLOAD: ${{ inputs.payload }}
+          REQUESTER: ${{ inputs.requester }}
+          REQUEST_ID: ${{ inputs.request_id }}
+        run: |
+          set -euo pipefail
+          [[ "${REQUEST_ID}" =~ ^[0-9-]+$ ]]
+          test "${REQUESTER}" = "${ACTOR}"
+          printf '%s' "${PAYLOAD}" >payload.json
+          owner=$(jq -er '.owner | select(test("^[A-Za-z0-9_.-]+$"))' payload.json)
+          repository=$(jq -er '.repository | select(test("^[A-Za-z0-9_.-]+$"))' payload.json)
+          slug="${owner}/${repository}"
+          operation=$(jq -er '.operation' payload.json)
+          footer='*Automated comment posted by Pukbot from an agent-assisted workflow.*'
+          attribution="from: @${ACTOR}"
+          case "${operation}" in
+            comment_create)
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              jq -er '.body | select(length > 0 and length <= 40000)' payload.json >body.txt
+              printf '\n\n---\n\n%s\n\n%s\n' "${footer}" "${attribution}" >>body.txt
+              jq -n --rawfile body body.txt '{body: $body}' >request.json
+              result=$(gh api --method POST "repos/${slug}/issues/${number}/comments" --input request.json --jq .html_url)
+              ;;
+            comment_edit)
+              comment_id=$(jq -er '.comment_id | select(. >= 1)' payload.json)
+              jq -er '.body | select(length > 0 and length <= 40000)' payload.json >body.txt
+              printf '\n\n---\n\n%s\n\n%s\n' "${footer}" "${attribution}" >>body.txt
+              jq -n --rawfile body body.txt '{body: $body}' >request.json
+              result=$(gh api --method PATCH "repos/${slug}/issues/comments/${comment_id}" --input request.json --jq .html_url)
+              ;;
+            comment_delete)
+              comment_id=$(jq -er '.comment_id | select(. >= 1)' payload.json)
+              result=$(gh api "repos/${slug}/issues/comments/${comment_id}" --jq .html_url)
+              gh api --method DELETE "repos/${slug}/issues/comments/${comment_id}"
+              ;;
+            comment_react)
+              comment_id=$(jq -er '.comment_id | select(. >= 1)' payload.json)
+              reaction=$(jq -er \
+                '.reaction | select(
+                  . == "+1" or . == "-1" or . == "laugh" or . == "confused" or
+                  . == "heart" or . == "hooray" or . == "rocket" or . == "eyes"
+                )' \
+                payload.json)
+              jq -n --arg content "${reaction}" '{content: $content}' >request.json
+              gh api --method POST \
+                -H 'Accept: application/vnd.github+json' \
+                "repos/${slug}/issues/comments/${comment_id}/reactions" \
+                --input request.json >/dev/null
+              result=$(gh api "repos/${slug}/issues/comments/${comment_id}" --jq .html_url)
+              ;;
+            *)
+              printf 'unsupported operation: %s\n' "${operation}" >&2
+              exit 1
+              ;;
+          esac
+          echo "pukbot-result-url=${result}"

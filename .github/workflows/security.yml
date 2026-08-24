@@ -45,7 +45,7 @@ jobs:
           tool: cargo-deny
       - run: cargo deny check "${{ matrix.check }}"
 
-  unused:
+  unused-dependencies:
     name: Unused dependencies
     runs-on: ubuntu-latest
     steps:
@@ -57,6 +57,18 @@ jobs:
           tool: cargo-machete,cargo-shear
       - run: cargo machete --with-metadata
       - run: cargo shear
+
+  osv:
+    name: OSV scanner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780
+        with:
+          tool: osv-scanner
+      - run: osv-scanner scan source --config osv-scanner.toml --recursive .
 
   gitleaks:
     name: Gitleaks
@@ -110,8 +122,9 @@ jobs:
         with:
           name: sbom
           path: '*.cdx.json'
+          if-no-files-found: error
 
-  dependency-review:
+  supply-chain:
     name: Dependency review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -125,7 +138,7 @@ jobs:
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294
         with:
           comment-summary-in-pr: on-failure
-          fail-on-severity: moderate
+          fail-on-severity: low
 
   codeql:
     name: CodeQL

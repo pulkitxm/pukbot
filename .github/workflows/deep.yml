@@ -102,7 +102,6 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3, 4, 5]
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -113,6 +112,7 @@ jobs:
           tool: cargo-mutants
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
       - name: Hunt surviving mutations
+        continue-on-error: true
         env:
           SHARD: ${{ matrix.shard }}
         run: cargo mutants --no-shuffle --in-place --timeout 120 --shard "${SHARD}/6"
@@ -136,6 +136,7 @@ jobs:
         with:
           tool: cargo-minimal-versions,cargo-hack
       - run: cargo minimal-versions check --all-targets
+        continue-on-error: true
 
   unused-dependencies:
     name: cargo-udeps

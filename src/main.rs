@@ -348,7 +348,9 @@ fn find_comment_url(run_id: u64) -> Result<Option<String>> {
 fn parse_comment_url(logs: &str) -> Option<String> {
     logs.lines().find_map(|line| {
         line.split_once("gitbot-comment-url=")
-            .map(|(_, url)| url.trim().to_owned())
+            .map(|(_, url)| url.trim())
+            .filter(|url| url.starts_with("https://github.com/") && url.contains("#issuecomment-"))
+            .map(str::to_owned)
     })
 }
 
@@ -440,7 +442,7 @@ mod tests {
 
     #[test]
     fn extracts_comment_url_from_logs() {
-        let logs = "Post comment\tstep\tgitbot-comment-url=https://github.com/owner/repo/pull/1#issuecomment-2";
+        let logs = "echo \"gitbot-comment-url=${comment_url}\"\nPost comment\tstep\tgitbot-comment-url=https://github.com/owner/repo/pull/1#issuecomment-2";
         assert_eq!(
             parse_comment_url(logs),
             Some("https://github.com/owner/repo/pull/1#issuecomment-2".to_owned())

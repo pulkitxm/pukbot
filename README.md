@@ -31,7 +31,7 @@ Read from stdin:
 pukbot comment 123 --repo owner/repository <comment.md
 ```
 
-Preview the final disclosed comment without contacting GitHub:
+Preview the final disclosed comment without dispatching a workflow:
 
 ```bash
 pukbot comment 123 --repo owner/repository --body "the release is ready" --dry-run
@@ -43,7 +43,13 @@ Every posted comment ends with:
 ---
 
 _Automated comment posted by Pukbot from an agent-assisted workflow._
+
+from: @authenticated-user
 ```
+
+After dispatching, the CLI finds the exact workflow run, follows its progress,
+prints failed logs, returns a failing exit status when the workflow fails, and
+prints the posted comment URL on success.
 
 GitHub CLI must be installed and authenticated. The authenticated user needs
 permission to dispatch the Comment workflow in `pulkitxm/Pukbot`.
@@ -75,7 +81,7 @@ printf 'header = "Authorization: Bearer %s"\n' "$(gh auth token)" \
     -H 'Accept: application/vnd.github.raw' \
     -H 'X-GitHub-Api-Version: 2022-11-28' \
     https://api.github.com/repos/pulkitxm/Pukbot/contents/install.sh \
-  | sh -s -- --version v0.1.0 --bin-dir "$HOME/.local/bin"
+  | sh -s -- --version v0.2.0 --bin-dir "$HOME/.local/bin"
 ```
 
 You can also download a binary manually from

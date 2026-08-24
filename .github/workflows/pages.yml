@@ -7,7 +7,7 @@ on:
       - 'install.sh'
       - 'install.ps1'
       - 'index.html'
-      - 'og.png'
+      - 'og.jpg'
       - 'CNAME'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
@@ -37,7 +37,7 @@ jobs:
       - name: Prepare installer artifact
         run: |
           mkdir _site
-          cp install.sh install.ps1 index.html og.png CNAME _site/
+          cp install.sh install.ps1 index.html og.jpg CNAME _site/
           test "$(find _site -type f | wc -l)" -eq 5
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9

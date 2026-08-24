@@ -6,7 +6,7 @@ rust-version = "1.85"
 description = "Post disclosed GitHub comments through the Pukbot GitHub App"
 license = "MIT"
 repository = "https://github.com/pulkitxm/pukbot"
-homepage = "https://pukbot.pulkit.page"
+homepage = "https://gitbot.pulkit.page"
 readme = "README.md"
 keywords = ["github", "bot", "comments", "automation", "cli"]
 categories = ["command-line-utilities", "development-tools"]
@@ -15,9 +15,13 @@ include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
 
 [dependencies]
 anyhow = "1.0"
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive", "string"] }
+clap_complete = "4.6"
+clap_mangen = "0.3"
 hex = "0.4"
 infer = "0.22"
+self-replace = "1.5"
+semver = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11"

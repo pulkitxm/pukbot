@@ -213,9 +213,18 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Generate completion and manual artifacts
+        run: |
+          chmod +x dist/pukbot-linux-x86_64
+          dist/pukbot-linux-x86_64 completions bash >dist/pukbot-completions.bash
+          dist/pukbot-linux-x86_64 completions zsh >dist/pukbot-completions.zsh
+          dist/pukbot-linux-x86_64 completions fish >dist/pukbot-completions.fish
+          dist/pukbot-linux-x86_64 completions elvish >dist/pukbot-completions.elvish
+          dist/pukbot-linux-x86_64 completions powershell >dist/pukbot-completions.ps1
+          dist/pukbot-linux-x86_64 man >dist/pukbot.1
       - name: Generate checksums
         working-directory: dist
-        run: sha256sum pukbot-* >SHA256SUMS
+        run: sha256sum pukbot-* pukbot.1 >SHA256SUMS
       - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780
         with:
           tool: syft

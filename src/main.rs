@@ -1,5 +1,8 @@
+mod completion;
+mod manual;
 mod media;
 mod model;
+mod update;
 mod workflow;
 
 use std::io::{self, IsTerminal, Read, Write};
@@ -9,12 +12,13 @@ use std::{fs, process};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
+use clap_complete::Shell;
 use model::{CommentDocument, Reaction, Repository, Request, ReviewEvent};
 use serde::Serialize;
 
 #[derive(Debug, Parser)]
 #[command(name = "pukbot", version, about)]
-struct Cli {
+pub(crate) struct Cli {
     #[arg(long, global = true)]
     json: bool,
     #[command(subcommand)]
@@ -36,6 +40,9 @@ enum Commands {
         #[command(subcommand)]
         command: PullRequestCommand,
     },
+    Completions(CompletionsArgs),
+    Man(ManArgs),
+    Update(UpdateArgs),
     Capabilities,
 }
 
@@ -45,6 +52,26 @@ struct ApplyArgs {
     input: PathBuf,
     #[arg(long)]
     dry_run: bool,
+}
+
+#[derive(Clone, Copy, Debug, Args)]
+struct CompletionsArgs {
+    #[arg(value_enum, required_unless_present = "install")]
+    shell: Option<Shell>,
+    #[arg(long)]
+    install: bool,
+}
+
+#[derive(Debug, Args)]
+struct ManArgs {
+    #[arg(long, value_name = "DIR")]
+    dir: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, Args)]
+struct UpdateArgs {
+    #[arg(long)]
+    check: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -284,7 +311,69 @@ fn run() -> Result<()> {
         Commands::Comment { command } => run_comment(command, cli.json),
         Commands::Issue { command } => run_issue(command, cli.json),
         Commands::Pr { command } => run_pull_request(command, cli.json),
+        Commands::Completions(args) => run_completions(args, cli.json),
+        Commands::Man(args) => run_manual(args, cli.json),
+        Commands::Update(args) => run_update(args, cli.json),
         Commands::Capabilities => emit_capabilities(cli.json),
+    }
+}
+
+fn run_completions(args: CompletionsArgs, json: bool) -> Result<()> {
+    if args.install {
+        let installed = completion::install(args.shell)?;
+        if json {
+            return emit_json(&installed);
+        }
+        let mut stdout = io::stdout().lock();
+        writeln!(
+            stdout,
+            "Installed {} completions to {}",
+            installed.shell,
+            installed.path.display()
+        )?;
+        return Ok(());
+    }
+    let shell = args.shell.context("completion shell is required")?;
+    let script = completion::script(shell)?;
+    if json {
+        emit_json(&serde_json::json!({"shell": shell.to_string(), "script": script}))
+    } else {
+        let mut stdout = io::stdout().lock();
+        write!(stdout, "{script}")?;
+        Ok(())
+    }
+}
+
+fn run_manual(args: ManArgs, json: bool) -> Result<()> {
+    if let Some(directory) = args.dir {
+        let paths = manual::write_all(&directory)?;
+        if json {
+            return emit_json(&serde_json::json!({"paths": paths}));
+        }
+        let mut stdout = io::stdout().lock();
+        for path in paths {
+            writeln!(stdout, "{path}")?;
+        }
+        return Ok(());
+    }
+    let page = manual::render()?;
+    if json {
+        emit_json(&serde_json::json!({"manual": page}))
+    } else {
+        let mut stdout = io::stdout().lock();
+        write!(stdout, "{page}")?;
+        Ok(())
+    }
+}
+
+fn run_update(args: UpdateArgs, json: bool) -> Result<()> {
+    let result = update::run(args.check)?;
+    if json {
+        emit_json(&result)
+    } else {
+        let mut stdout = io::stdout().lock();
+        writeln!(stdout, "{}", result.text())?;
+        Ok(())
     }
 }
 
@@ -630,6 +719,9 @@ fn emit_capabilities(json: bool) -> Result<()> {
             "pr.assignees",
             "pr.react",
             "pr.update-branch",
+            "completions",
+            "man",
+            "update",
         ],
         media: media::supported_extensions(),
         output: vec!["text", "json"],

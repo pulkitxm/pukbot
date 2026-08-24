@@ -16,7 +16,7 @@ token, performs the operation, and discards the token.
 
 Install the public GitHub App on the repositories where comments may be posted:
 
-[Install Pukbot on GitHub](https://github.com/apps/pulkit-pukbot)
+[Install Pukbot on GitHub](https://github.com/apps/pukbot)
 
 Grant access only to the repositories that need Pukbot. The App requests issue
 and pull request write access so the protected workflow can post comments.
@@ -24,13 +24,13 @@ and pull request write access so the protected workflow can post comments.
 Linux and macOS:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://pukbot.pulkit.page/install.sh | sh
+curl --proto '=https' --tlsv1.2 -fsSL https://gitbot.pulkit.page/install.sh | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://pukbot.pulkit.page/install.ps1 | iex
+irm https://gitbot.pulkit.page/install.ps1 | iex
 ```
 
 Cargo:
@@ -41,6 +41,28 @@ cargo install pukbot --locked
 
 The installers download the matching binary from GitHub Releases and verify
 its SHA-256 checksum before installation.
+
+Update an installed release binary with the same checksum verification:
+
+```bash
+pukbot update
+pukbot update --check --json
+```
+
+Generate or install shell completions for Bash, Zsh, Fish, Elvish, and
+PowerShell:
+
+```bash
+pukbot completions zsh
+pukbot completions --install
+```
+
+Print a manual page or generate one page per command:
+
+```bash
+pukbot man
+pukbot man --dir ./man
+```
 
 ## Use
 

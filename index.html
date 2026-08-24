@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#07111f">
+    <meta
+      name="description"
+      content="Pukbot is a secure Rust CLI for GitHub comments, issues, pull requests, reviews, reactions, and media."
+    >
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Pukbot">
+    <meta
+      property="og:description"
+      content="GitHub automation, safely delegated."
+    >
+    <meta property="og:image" content="https://gitbot.pulkit.page/og.jpg">
+    <meta property="og:url" content="https://gitbot.pulkit.page/">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Pukbot">
+    <meta
+      name="twitter:description"
+      content="GitHub automation, safely delegated."
+    >
+    <meta name="twitter:image" content="https://gitbot.pulkit.page/og.jpg">
+    <title>Pukbot | Secure GitHub automation</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #050b14;
+        --panel: rgba(12, 24, 41, 0.78);
+        --panel-strong: #0e1b2d;
+        --line: rgba(148, 179, 217, 0.17);
+        --text: #f5f8ff;
+        --muted: #9fb0c7;
+        --blue: #6bb7ff;
+        --violet: #9c87ff;
+        --green: #62e6a7;
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 12% 8%, rgba(60, 137, 255, 0.2), transparent 28rem),
+          radial-gradient(circle at 88% 16%, rgba(138, 92, 255, 0.18), transparent 30rem),
+          linear-gradient(180deg, #07111f 0%, var(--bg) 52%, #070d17 100%);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        line-height: 1.55;
+      }
+
+      body::before {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        content: "";
+        pointer-events: none;
+        opacity: 0.25;
+        background-image:
+          linear-gradient(var(--line) 1px, transparent 1px),
+          linear-gradient(90deg, var(--line) 1px, transparent 1px);
+        background-size: 42px 42px;
+        mask-image: linear-gradient(to bottom, black, transparent 72%);
+      }
+
+      a {
+        color: inherit;
+      }
+
+      button,
+      a {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .skip-link {
+        position: fixed;
+        top: 1rem;
+        left: 1rem;
+        z-index: 20;
+        padding: 0.7rem 1rem;
+        color: #07111f;
+        background: white;
+        border-radius: 0.7rem;
+        transform: translateY(-180%);
+      }
+
+      .skip-link:focus {
+        transform: translateY(0);
+      }
+
+      .shell {
+        width: min(1120px, calc(100% - 2rem));
+        margin: 0 auto;
+      }
+
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        border-bottom: 1px solid var(--line);
+        background: rgba(5, 11, 20, 0.76);
+        backdrop-filter: blur(20px);
+      }
+
+      nav {
+        display: flex;
+        min-height: 70px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.7rem;
+        font-weight: 760;
+        text-decoration: none;
+        letter-spacing: -0.02em;
+      }
+
+      .brand img {
+        width: 38px;
+        height: 38px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 11px;
+        background: white;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 1.25rem;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      .nav-links a {
+        text-decoration: none;
+      }
+
+      .nav-links a:hover,
+      .nav-links a:focus-visible {
+        color: var(--text);
+      }
+
+      .button {
+        display: inline-flex;
+        min-height: 44px;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        padding: 0.72rem 1rem;
+        border: 1px solid var(--line);
+        border-radius: 0.8rem;
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.045);
+        font-weight: 680;
+        text-decoration: none;
+        transition: 160ms ease;
+      }
+
+      .button:hover,
+      .button:focus-visible {
+        border-color: rgba(107, 183, 255, 0.48);
+        background: rgba(107, 183, 255, 0.1);
+        transform: translateY(-1px);
+      }
+
+      .button.primary {
+        border-color: transparent;
+        color: #06101d;
+        background: linear-gradient(135deg, #8bd1ff, #9f8dff);
+        box-shadow: 0 12px 36px rgba(93, 146, 255, 0.24);
+      }
+
+      .hero {
+        display: grid;
+        min-height: 670px;
+        align-items: center;
+        grid-template-columns: 1.08fr 0.92fr;
+        gap: 4rem;
+        padding: 7.5rem 0 6rem;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
+        margin-bottom: 1.25rem;
+        padding: 0.42rem 0.72rem;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: #cfe5ff;
+        background: rgba(107, 183, 255, 0.06);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.78rem;
+      }
+
+      .status-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--green);
+        box-shadow: 0 0 16px var(--green);
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        max-width: 760px;
+        margin-bottom: 1.35rem;
+        font-size: clamp(3.3rem, 7vw, 6.4rem);
+        line-height: 0.96;
+        letter-spacing: -0.07em;
+      }
+
+      .gradient-text {
+        color: transparent;
+        background: linear-gradient(110deg, #ffffff 5%, var(--blue) 48%, #b49dff 92%);
+        background-clip: text;
+      }
+
+      .hero-copy > p {
+        max-width: 640px;
+        margin-bottom: 2rem;
+        color: var(--muted);
+        font-size: clamp(1.05rem, 2vw, 1.24rem);
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.8rem;
+      }
+
+      .terminal {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid rgba(148, 179, 217, 0.2);
+        border-radius: 1.15rem;
+        background: rgba(6, 13, 23, 0.9);
+        box-shadow: var(--shadow);
+      }
+
+      .terminal::after {
+        position: absolute;
+        inset: 0;
+        content: "";
+        pointer-events: none;
+        background: linear-gradient(135deg, rgba(107, 183, 255, 0.07), transparent 45%);
+      }
+
+      .terminal-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.85rem 1rem;
+        border-bottom: 1px solid var(--line);
+        color: #7f91a9;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.75rem;
+      }
+
+      .dots {
+        display: flex;
+        gap: 0.42rem;
+      }
+
+      .dots span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #3a4960;
+      }
+
+      .terminal pre,
+      .command-card pre,
+      .install-box pre {
+        overflow-x: auto;
+        margin: 0;
+        color: #d9e9ff;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.86rem;
+        line-height: 1.75;
+        white-space: pre;
+      }
+
+      .terminal pre {
+        min-height: 360px;
+        padding: 1.3rem;
+      }
+
+      .prompt {
+        color: var(--green);
+      }
+
+      .flag {
+        color: var(--blue);
+      }
+
+      .value {
+        color: #c7b9ff;
+      }
+
+      .success {
+        color: var(--green);
+      }
+
+      section {
+        padding: 5.5rem 0;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 2rem;
+        margin-bottom: 2rem;
+      }
+
+      h2 {
+        margin-bottom: 0.6rem;
+        font-size: clamp(2.1rem, 4vw, 3.3rem);
+        line-height: 1.08;
+        letter-spacing: -0.045em;
+      }
+
+      .section-head p {
+        max-width: 540px;
+        margin-bottom: 0;
+        color: var(--muted);
+      }
+
+      .install-panel {
+        display: grid;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 1.25rem;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        grid-template-columns: 0.72fr 1.28fr;
+      }
+
+      .install-copy {
+        padding: 2rem;
+        border-right: 1px solid var(--line);
+      }
+
+      .install-copy p {
+        color: var(--muted);
+      }
+
+      .install-copy code {
+        color: var(--green);
+      }
+
+      .install-commands {
+        display: grid;
+      }
+
+      .install-box {
+        position: relative;
+        padding: 1.6rem 4.6rem 1.6rem 1.6rem;
+      }
+
+      .install-box + .install-box {
+        border-top: 1px solid var(--line);
+      }
+
+      .install-box small {
+        display: block;
+        margin-bottom: 0.65rem;
+        color: #8092ab;
+        font-weight: 680;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+
+      .copy {
+        position: absolute;
+        top: 1.35rem;
+        right: 1.35rem;
+        min-width: 58px;
+        padding: 0.42rem 0.6rem;
+        border: 1px solid var(--line);
+        border-radius: 0.55rem;
+        color: #c8d7ea;
+        background: #111f32;
+        cursor: pointer;
+        font: inherit;
+        font-size: 0.75rem;
+      }
+
+      .copy:hover,
+      .copy:focus-visible {
+        border-color: rgba(107, 183, 255, 0.48);
+        color: white;
+      }
+
+      .command-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+      }
+
+      .command-card {
+        min-width: 0;
+        padding: 1.45rem;
+        border: 1px solid var(--line);
+        border-radius: 1rem;
+        background: var(--panel);
+      }
+
+      .command-card h3 {
+        margin-bottom: 0.35rem;
+        font-size: 1rem;
+      }
+
+      .command-card p {
+        margin-bottom: 1rem;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .command-card pre {
+        padding: 0.9rem;
+        border: 1px solid rgba(148, 179, 217, 0.12);
+        border-radius: 0.7rem;
+        background: rgba(3, 8, 15, 0.65);
+      }
+
+      .steps {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1rem;
+      }
+
+      .step {
+        padding: 1.5rem;
+        border-top: 1px solid var(--line);
+      }
+
+      .step-number {
+        display: inline-grid;
+        width: 34px;
+        height: 34px;
+        margin-bottom: 1.25rem;
+        place-items: center;
+        border: 1px solid rgba(107, 183, 255, 0.28);
+        border-radius: 50%;
+        color: var(--blue);
+        background: rgba(107, 183, 255, 0.08);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .step p {
+        margin-bottom: 0;
+        color: var(--muted);
+      }
+
+      .security {
+        display: grid;
+        align-items: center;
+        gap: 2rem;
+        padding: 2.2rem;
+        border: 1px solid rgba(98, 230, 167, 0.2);
+        border-radius: 1.25rem;
+        background: linear-gradient(135deg, rgba(98, 230, 167, 0.08), rgba(107, 183, 255, 0.06));
+        grid-template-columns: 1fr auto;
+      }
+
+      .security p {
+        max-width: 740px;
+        margin-bottom: 0;
+        color: var(--muted);
+      }
+
+      footer {
+        padding: 2.5rem 0 3rem;
+        border-top: 1px solid var(--line);
+        color: #8293aa;
+        font-size: 0.88rem;
+      }
+
+      .footer-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+
+      .footer-links {
+        display: flex;
+        gap: 1rem;
+      }
+
+      .footer-links a {
+        text-decoration: none;
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: 3px;
+      }
+
+      @media (max-width: 850px) {
+        .hero {
+          min-height: auto;
+          grid-template-columns: 1fr;
+          gap: 2.5rem;
+          padding: 5rem 0;
+        }
+
+        .terminal pre {
+          min-height: auto;
+        }
+
+        .install-panel {
+          grid-template-columns: 1fr;
+        }
+
+        .install-copy {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .steps {
+          grid-template-columns: 1fr;
+        }
+
+        .security {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 650px) {
+        .shell {
+          width: min(100% - 1.2rem, 1120px);
+        }
+
+        .nav-links > a:not(.button) {
+          display: none;
+        }
+
+        .hero {
+          padding-top: 4rem;
+        }
+
+        h1 {
+          font-size: clamp(3.25rem, 17vw, 5rem);
+        }
+
+        section {
+          padding: 4rem 0;
+        }
+
+        .section-head,
+        .footer-row {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .command-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .install-box {
+          padding-right: 1.2rem;
+          padding-bottom: 4.1rem;
+        }
+
+        .copy {
+          top: auto;
+          right: auto;
+          bottom: 1.2rem;
+          left: 1.2rem;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        .button {
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header>
+      <nav class="shell" aria-label="Main navigation">
+        <a class="brand" href="#main">
+          <img
+            src="https://avatars.githubusercontent.com/in/4699163?s=96&amp;v=4"
+            alt="Pukbot"
+            width="38"
+            height="38"
+          >
+          <span>Pukbot</span>
+        </a>
+        <div class="nav-links">
+          <a href="#install">Install</a>
+          <a href="#commands">Commands</a>
+          <a href="https://github.com/pulkitxm/pukbot">GitHub</a>
+          <a class="button" href="https://github.com/apps/pukbot">Install App</a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <div class="shell hero">
+        <div class="hero-copy">
+          <div class="eyebrow">
+            <span class="status-dot" aria-hidden="true"></span>
+            Rust CLI &middot; GitHub App &middot; short-lived tokens
+          </div>
+          <h1><span class="gradient-text">GitHub work, safely delegated.</span></h1>
+          <p>
+            Pukbot handles comments, media, issues, pull requests, reviews, and
+            reactions without putting the GitHub App private key on your machine.
+          </p>
+          <div class="actions">
+            <a class="button primary" href="#install">Install the CLI</a>
+            <a class="button" href="https://github.com/pulkitxm/pukbot">View source</a>
+          </div>
+        </div>
+
+        <section class="terminal" aria-label="Pukbot command example">
+          <div class="terminal-bar">
+            <div class="dots" aria-hidden="true"><span></span><span></span><span></span></div>
+            <span>pukbot</span>
+          </div>
+          <pre><span class="prompt">$</span> pukbot comment create 548 \
+  <span class="flag">--repo</span> <span class="value">Noveum/noveum-app-nextjs</span> \
+  <span class="flag">--body</span> <span class="value">"release checks passed"</span>
+
+dispatching protected workflow
+streaming logs
+<span class="success">comment created</span>
+https://github.com/Noveum/noveum-app-nextjs/pull/548#issuecomment-...</pre>
+        </section>
+      </div>
+
+      <section id="install">
+        <div class="shell">
+          <div class="section-head">
+            <div>
+              <h2>Install in one command.</h2>
+              <p>The installer selects your platform and verifies the release checksum.</p>
+            </div>
+            <a class="button" href="https://github.com/pulkitxm/pukbot/releases">Releases</a>
+          </div>
+
+          <div class="install-panel">
+            <div class="install-copy">
+              <h3>Before you start</h3>
+              <p>
+                Install the <a href="https://github.com/apps/pukbot">Pukbot GitHub App</a>
+                on the repositories you want to manage. You also need an authenticated
+                <code>gh</code> CLI.
+              </p>
+            </div>
+            <div class="install-commands">
+              <div class="install-box">
+                <small>macOS and Linux</small>
+                <pre id="install-unix">curl --proto '=https' --tlsv1.2 -fsSL https://gitbot.pulkit.page/install.sh | sh</pre>
+                <button class="copy" type="button" data-copy="install-unix">Copy</button>
+              </div>
+              <div class="install-box">
+                <small>Windows PowerShell</small>
+                <pre id="install-windows">irm https://gitbot.pulkit.page/install.ps1 | iex</pre>
+                <button class="copy" type="button" data-copy="install-windows">Copy</button>
+              </div>
+              <div class="install-box">
+                <small>Cargo</small>
+                <pre id="install-cargo">cargo install pukbot --locked</pre>
+                <button class="copy" type="button" data-copy="install-cargo">Copy</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="commands">
+        <div class="shell">
+          <div class="section-head">
+            <div>
+              <h2>One CLI, the useful GitHub operations.</h2>
+              <p>Use direct commands interactively or typed JSON for repeatable automation.</p>
+            </div>
+          </div>
+
+          <div class="command-grid">
+            <article class="command-card">
+              <h3>Comments</h3>
+              <p>Create, edit, delete, and react by comment ID.</p>
+              <pre>pukbot comment create 123 --repo owner/repo --body "ready"
+pukbot comment edit 456 --repo owner/repo --body "updated"
+pukbot comment delete 456 --repo owner/repo --yes</pre>
+            </article>
+
+            <article class="command-card">
+              <h3>Images, video, and files</h3>
+              <p>Place multiple named media items anywhere in a JSON comment body.</p>
+              <pre>pukbot apply --input request.json
+pukbot apply --input request.json --dry-run
+pukbot apply --input request.json --json</pre>
+            </article>
+
+            <article class="command-card">
+              <h3>Issues</h3>
+              <p>Create and update issues, labels, assignees, state, and reactions.</p>
+              <pre>pukbot issue create --repo owner/repo --title "bug"
+pukbot issue labels 123 --repo owner/repo --add urgent
+pukbot issue close 123 --repo owner/repo</pre>
+            </article>
+
+            <article class="command-card">
+              <h3>Pull requests</h3>
+              <p>Create, review, label, update, close, reopen, and squash merge.</p>
+              <pre>pukbot pr review 123 --repo owner/repo --event approve
+pukbot pr update-branch 123 --repo owner/repo
+pukbot pr merge 123 --repo owner/repo --yes</pre>
+            </article>
+
+            <article class="command-card">
+              <h3>Updates and completions</h3>
+              <p>Keep the binary current and install completions for five shells.</p>
+              <pre>pukbot update
+pukbot update --check --json
+pukbot completions --install</pre>
+            </article>
+
+            <article class="command-card">
+              <h3>Discoverability</h3>
+              <p>Generate manuals or inspect the machine-readable feature inventory.</p>
+              <pre>pukbot man
+pukbot man --dir ./man
+pukbot capabilities --json</pre>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="shell">
+          <div class="section-head">
+            <div>
+              <h2>How it stays secure.</h2>
+              <p>The local CLI coordinates the operation without handling App credentials.</p>
+            </div>
+          </div>
+          <div class="steps">
+            <article class="step">
+              <span class="step-number">1</span>
+              <h3>Dispatch</h3>
+              <p>The authenticated GitHub CLI dispatches a typed operation to Pukbot.</p>
+            </article>
+            <article class="step">
+              <span class="step-number">2</span>
+              <h3>Authorize</h3>
+              <p>A protected environment mints a short-lived token for one repository.</p>
+            </article>
+            <article class="step">
+              <span class="step-number">3</span>
+              <h3>Expire</h3>
+              <p>The operation completes, logs stream locally, and the token expires.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="shell security">
+          <div>
+            <h2>Your private key stays private.</h2>
+            <p>
+              It lives only in a protected GitHub Actions environment secret. It is never
+              embedded in the CLI, crate, release binaries, Pages site, or installer scripts.
+            </p>
+          </div>
+          <a class="button" href="https://github.com/pulkitxm/pukbot/blob/main/SECURITY.md">
+            Security model
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="shell footer-row">
+        <span>Pukbot &middot; open source under the MIT License</span>
+        <div class="footer-links">
+          <a href="https://github.com/pulkitxm/pukbot">GitHub</a>
+          <a href="https://crates.io/crates/pukbot">crates.io</a>
+          <a href="https://github.com/pulkitxm/pukbot/blob/main/docs/Operations.md">Docs</a>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      for (const button of document.querySelectorAll("[data-copy]")) {
+        button.addEventListener("click", async () => {
+          const source = document.getElementById(button.dataset.copy);
+          await navigator.clipboard.writeText(source.textContent.trim());
+          button.textContent = "Copied";
+          window.setTimeout(() => {
+            button.textContent = "Copy";
+          }, 1600);
+        });
+      }
+    </script>
+  </body>
+</html>

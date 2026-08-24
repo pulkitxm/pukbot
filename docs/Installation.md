@@ -1,16 +1,16 @@
 # Installation
 
-Install the [Pukbot GitHub App](https://github.com/apps/pulkit-pukbot) on the
+Install the [Pukbot GitHub App](https://github.com/apps/pukbot) on the
 repositories where comments may be posted. Select only the repositories that
 need access.
 
 Linux and macOS:
 
-    curl --proto '=https' --tlsv1.2 -fsSL https://pukbot.pulkit.page/install.sh | sh
+    curl --proto '=https' --tlsv1.2 -fsSL https://gitbot.pulkit.page/install.sh | sh
 
 Windows PowerShell:
 
-    irm https://pukbot.pulkit.page/install.ps1 | iex
+    irm https://gitbot.pulkit.page/install.ps1 | iex
 
 Cargo:
 

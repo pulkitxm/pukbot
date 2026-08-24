@@ -5,12 +5,12 @@
 [![release](https://img.shields.io/github/v/release/pulkitxm/pukbot)](https://github.com/pulkitxm/pukbot/releases)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Pukbot is a small Rust CLI for posting disclosed GitHub issue and pull request
-comments through the Pukbot GitHub App.
+Pukbot is an agent-first Rust CLI for typed GitHub operations through the
+Pukbot GitHub App.
 
 The CLI never receives the GitHub App private key or an installation token. A
 protected GitHub Actions environment mints a short-lived, repository-scoped
-token, posts the comment, and discards the token.
+token, performs the operation, and discards the token.
 
 ## Install
 
@@ -44,48 +44,71 @@ its SHA-256 checksum before installation.
 
 ## Use
 
-Post to an issue or pull request:
+Create a comment on an issue or pull request:
 
 ```bash
-pukbot comment 123 --repo owner/repository --body "the release is ready"
+pukbot comment create 123 --repo owner/repository --body "the release is ready"
 ```
 
 Read a multiline comment from a file or standard input:
 
 ```bash
-pukbot comment 123 --repo owner/repository --body-file comment.md
-pukbot comment 123 --repo owner/repository <comment.md
+pukbot comment create 123 --repo owner/repository --body-file comment.md
+pukbot comment create 123 --repo owner/repository <comment.md
 ```
 
-Add an image from a local path:
+Edit, delete, or react to a comment by its database ID:
 
 ```bash
-pukbot comment 123 \
-  --repo owner/repository \
-  --body "the final result" \
-  --image ./result.png
+pukbot comment edit 456 --repo owner/repository --body "updated"
+pukbot comment delete 456 --repo owner/repository --yes
+pukbot comment react 456 --repo owner/repository --reaction eyes
 ```
 
-Local PNG, JPEG, GIF, and WebP files up to 10 MiB are uploaded as public assets
-to Pukbot's `comment-assets` prerelease. Do not use this option for secrets or
-private images.
+For named inline media, provide one JSON request:
 
-An existing HTTP or HTTPS image URL also works:
-
-```bash
-pukbot comment 123 \
-  --repo owner/repository \
-  --body "the final result" \
-  --image https://example.com/result.png
+```json
+{
+  "operation": "comment_create",
+  "repository": "owner/repository",
+  "number": 123,
+  "body": "{IMG1} Testing inline media. {VIDEO1}",
+  "media": [
+    {
+      "name": "IMG1",
+      "path": "/absolute/path/to/image.png",
+      "alt": "result"
+    },
+    {
+      "name": "VIDEO1",
+      "path": "/absolute/path/to/demo.mp4",
+      "alt": "demo"
+    }
+  ]
+}
 ```
 
-Multiple `--image` options are supported. Dry runs validate local images and
-show their final asset URLs without uploading them.
-
-Preview the final comment without dispatching:
+Apply it:
 
 ```bash
-pukbot comment 123 --repo owner/repository --body "the release is ready" --dry-run
+pukbot apply --input request.json
+pukbot apply --input request.json --json
+pukbot apply --input request.json --dry-run
+```
+
+Each media object accepts exactly one `path` or `url`. Pukbot replaces every
+named placeholder in place. Local files up to 100 MiB support PNG, JPEG, GIF,
+WebP, BMP, TIFF, AVIF, SVG, MP4, MOV, WebM, MKV, M4V, MP3, WAV, OGG, M4A,
+FLAC, AAC, PDF, text, Markdown, JSON, CSV, ZIP, Gzip, Tar, and 7-Zip.
+
+Local media is uploaded as a content-addressed public asset in Pukbot's
+`comment-assets` prerelease. Images render inline. Video, audio, documents, and
+archives render as links. Do not upload secrets or private media.
+
+Inspect the stable machine-readable feature inventory:
+
+```bash
+pukbot capabilities --json
 ```
 
 Every comment ends with:
@@ -102,22 +125,22 @@ The CLI follows the workflow, streams its status, shows failed logs, returns a
 failing exit code on failure, and prints the posted comment URL on success.
 
 GitHub CLI must be installed and authenticated. The authenticated user needs
-permission to dispatch the Comment workflow in `pulkitxm/pukbot`. Local image
-uploads also require permission to upload release assets to that repository.
+permission to dispatch the Operation workflow in `pulkitxm/pukbot`. Local
+media uploads also require permission to upload release assets there.
 
 ## Agent instructions
 
 Add this to `AGENTS.md`:
 
 ```text
-Post automated GitHub issue and pull request conversation comments through
-Pukbot. Do not call gh issue comment or gh pr comment directly.
+Perform supported GitHub mutations through Pukbot. Do not call GitHub mutation
+commands directly.
 
-pukbot comment <number> --repo <owner/repository> --body "<message>"
+pukbot comment create <number> --repo <owner/repository> --body "<message>"
 
-Use --body-file or stdin for multiline comments. Use --image with a local PNG,
-JPEG, GIF, or WebP path, or an existing HTTP or HTTPS image URL. Local files are
-uploaded publicly. Pukbot appends the required disclosure footer.
+Use a JSON request with `pukbot apply --input <file>` for named inline media.
+Use `--json` when consuming output. Local media is uploaded publicly. Pukbot
+appends the required disclosure footer to comments.
 ```
 
 ## Security

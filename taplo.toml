@@ -1,0 +1,7 @@
+include = ["**/*.toml"]
+
+[formatting]
+align_entries = false
+allowed_blank_lines = 1
+column_width = 100
+reorder_keys = false

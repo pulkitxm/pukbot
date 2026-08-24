@@ -841,4 +841,39 @@ mod tests {
             Operation::PullRequestReview { .. }
         ));
     }
+
+    #[test]
+    fn prepares_every_operation() {
+        let documents = [
+            r#"{"operation":"comment_create","repository":"owner/repo","number":1,"body":"message"}"#,
+            r#"{"operation":"comment_edit","repository":"owner/repo","comment_id":1,"body":"message"}"#,
+            r#"{"operation":"comment_delete","repository":"owner/repo","comment_id":1}"#,
+            r#"{"operation":"comment_react","repository":"owner/repo","comment_id":1,"reaction":"heart"}"#,
+            r#"{"operation":"issue_create","repository":"owner/repo","title":"title","body":"body","labels":["bug"],"assignees":["owner"]}"#,
+            r#"{"operation":"issue_edit","repository":"owner/repo","number":1,"title":"title","body":"body"}"#,
+            r#"{"operation":"issue_close","repository":"owner/repo","number":1}"#,
+            r#"{"operation":"issue_reopen","repository":"owner/repo","number":1}"#,
+            r#"{"operation":"issue_labels","repository":"owner/repo","number":1,"add":["bug"],"remove":["help wanted"]}"#,
+            r#"{"operation":"issue_assignees","repository":"owner/repo","number":1,"add":["owner"],"remove":["user"]}"#,
+            r#"{"operation":"issue_react","repository":"owner/repo","number":1,"reaction":"rocket"}"#,
+            r#"{"operation":"pull_request_create","repository":"owner/repo","title":"title","body":"body","head":"feature","base":"main","draft":true}"#,
+            r#"{"operation":"pull_request_edit","repository":"owner/repo","number":1,"title":"title","body":"body","base":"main"}"#,
+            r#"{"operation":"pull_request_close","repository":"owner/repo","number":1}"#,
+            r#"{"operation":"pull_request_reopen","repository":"owner/repo","number":1}"#,
+            r#"{"operation":"pull_request_merge","repository":"owner/repo","number":1}"#,
+            r#"{"operation":"pull_request_ready","repository":"owner/repo","number":1}"#,
+            r#"{"operation":"pull_request_draft","repository":"owner/repo","number":1}"#,
+            r#"{"operation":"pull_request_review","repository":"owner/repo","number":1,"event":"request_changes","body":"change this"}"#,
+            r#"{"operation":"pull_request_labels","repository":"owner/repo","number":1,"add":["bug"],"remove":[]}"#,
+            r#"{"operation":"pull_request_assignees","repository":"owner/repo","number":1,"add":[],"remove":["user"]}"#,
+            r#"{"operation":"pull_request_react","repository":"owner/repo","number":1,"reaction":"eyes"}"#,
+            r#"{"operation":"pull_request_update_branch","repository":"owner/repo","number":1}"#,
+        ];
+
+        for document in documents {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            let operation = request.prepare(true).expect("request should prepare");
+            assert!(!operation.name().is_empty());
+        }
+    }
 }

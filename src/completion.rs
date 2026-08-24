@@ -1,6 +1,5 @@
-use std::env;
-use std::fs;
 use std::path::PathBuf;
+use std::{env, fs};
 
 use anyhow::{Context, Result, bail};
 use clap::CommandFactory;
@@ -98,7 +97,7 @@ mod tests {
             Shell::Elvish,
             Shell::PowerShell,
         ] {
-            assert!(!script(shell).expect("completion should render").is_empty());
+            assert_ne!(script(shell).expect("completion should render"), "");
         }
     }
 }

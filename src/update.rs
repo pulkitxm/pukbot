@@ -1,6 +1,5 @@
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -86,7 +85,7 @@ pub fn run(check_only: bool) -> Result<UpdateResult> {
         .write_all(&binary)
         .context("failed to stage update")?;
     staged.flush().context("failed to flush staged update")?;
-    replace_executable(&running_executable()?, staged.path())?;
+    self_replace::self_replace(staged.path()).context("failed to replace Pukbot executable")?;
     Ok(UpdateResult {
         status: UpdateStatus::Updated,
         current_version: current.to_string(),
@@ -182,72 +181,6 @@ fn asset_for(os: &str, arch: &str) -> Result<&'static str> {
         ("windows", "x86_64" | "aarch64") => Ok("pukbot-windows-x86_64.exe"),
         _ => bail!("Pukbot does not publish an update for {os} {arch}"),
     }
-}
-
-fn running_executable() -> Result<PathBuf> {
-    let invocation = std::env::args_os()
-        .next()
-        .context("running Pukbot executable has no invocation path")?;
-    let path = PathBuf::from(invocation);
-    let candidate = if path.components().count() > 1 {
-        if path.is_absolute() {
-            path
-        } else {
-            std::env::current_dir()
-                .context("failed to resolve the current directory")?
-                .join(path)
-        }
-    } else {
-        std::env::var_os("PATH")
-            .and_then(|paths| {
-                std::env::split_paths(&paths)
-                    .map(|directory| directory.join(&path))
-                    .find(|candidate| candidate.is_file())
-            })
-            .context("failed to locate running Pukbot executable in PATH")?
-    };
-    candidate
-        .canonicalize()
-        .context("failed to resolve running Pukbot executable")
-}
-
-fn replace_executable(current: &Path, staged: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        replace_unix(current, staged)
-    }
-    #[cfg(windows)]
-    {
-        let _ = current;
-        self_replace::self_replace(staged).context("failed to replace Pukbot executable")
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = (current, staged);
-        bail!("self-update is not supported on this platform")
-    }
-}
-
-#[cfg(unix)]
-fn replace_unix(current: &Path, staged: &Path) -> Result<()> {
-    let parent = current
-        .parent()
-        .context("running executable has no parent directory")?;
-    let permissions = fs::metadata(current)
-        .context("failed to read executable permissions")?
-        .permissions();
-    let temporary = tempfile::NamedTempFile::new_in(parent)
-        .context("failed to stage update beside executable")?;
-    fs::copy(staged, temporary.path()).context("failed to copy staged update")?;
-    fs::set_permissions(temporary.path(), permissions)
-        .context("failed to preserve executable permissions")?;
-    drop(
-        temporary
-            .persist(current)
-            .map_err(|error| error.error)
-            .context("failed to replace Pukbot executable")?,
-    );
-    Ok(())
 }
 
 #[cfg(test)]

@@ -25,6 +25,11 @@ The CLI invokes GitHub CLI directly with argument arrays. It does not read or
 store the Gitbot App private key, installation tokens, or crates.io publishing
 credentials.
 
+Local images are validated by file signature, limited to 10 MiB, assigned a
+content-derived filename, and uploaded through the authenticated GitHub CLI
+session to the public `comment-assets` prerelease. Never attach credentials,
+private repository content, personal data, or other non-public images.
+
 The comment workflow stores the App private key in a protected environment,
 mints a short-lived installation token scoped to one repository, requests only
 issue and pull request write access, validates every input independently, and

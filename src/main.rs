@@ -1,12 +1,11 @@
 use std::ffi::OsString;
-use std::fs;
 use std::io::{self, IsTerminal, Read, Write};
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{fs, thread};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};

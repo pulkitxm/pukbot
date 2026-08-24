@@ -15,7 +15,7 @@ $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol =
     [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-$Repository = "pulkitxm/gitbot"
+$Repository = "pulkitxm/pukbot"
 $ReleasesUrl = "https://github.com/$Repository/releases"
 
 function Write-Info {
@@ -57,7 +57,7 @@ function Invoke-Download {
     }
 }
 
-function Install-Gitbot {
+function Install-Pukbot {
     param(
         [string] $RequestedVersion,
         [string] $RequestedBinDir,
@@ -69,37 +69,37 @@ function Install-Gitbot {
     }
 
     if ([string]::IsNullOrWhiteSpace($RequestedVersion)) {
-        $RequestedVersion = if ([string]::IsNullOrWhiteSpace($env:GITBOT_VERSION)) {
+        $RequestedVersion = if ([string]::IsNullOrWhiteSpace($env:PUKBOT_VERSION)) {
             "latest"
         }
         else {
-            $env:GITBOT_VERSION
+            $env:PUKBOT_VERSION
         }
     }
 
     if ([string]::IsNullOrWhiteSpace($RequestedBinDir)) {
-        if (-not [string]::IsNullOrWhiteSpace($env:GITBOT_INSTALL_DIR)) {
-            $RequestedBinDir = $env:GITBOT_INSTALL_DIR
+        if (-not [string]::IsNullOrWhiteSpace($env:PUKBOT_INSTALL_DIR)) {
+            $RequestedBinDir = $env:PUKBOT_INSTALL_DIR
         }
         elseif (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
-            $RequestedBinDir = Join-Path $env:LOCALAPPDATA "Programs\Gitbot\bin"
+            $RequestedBinDir = Join-Path $env:LOCALAPPDATA "Programs\Pukbot\bin"
         }
         elseif (-not [string]::IsNullOrWhiteSpace($HOME)) {
             $RequestedBinDir = Join-Path $HOME ".local\bin"
         }
         else {
-            throw "could not determine an installation directory; set GITBOT_INSTALL_DIR"
+            throw "could not determine an installation directory; set PUKBOT_INSTALL_DIR"
         }
     }
 
     $architecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
     switch ($architecture) {
-        "X64" { $asset = "gitbot-windows-x86_64.exe" }
+        "X64" { $asset = "pukbot-windows-x86_64.exe" }
         "Arm64" {
-            $asset = "gitbot-windows-x86_64.exe"
+            $asset = "pukbot-windows-x86_64.exe"
             Write-Warning "a native Windows ARM64 build is not available; installing the x64 build"
         }
-        default { throw "Gitbot does not publish a Windows release for architecture '$architecture'" }
+        default { throw "Pukbot does not publish a Windows release for architecture '$architecture'" }
     }
 
     if ($RequestedVersion -eq "latest") {
@@ -115,14 +115,14 @@ function Install-Gitbot {
         $versionLabel = $releaseTag
     }
 
-    $tempDir = Join-Path ([IO.Path]::GetTempPath()) ("gitbot-install-" + [Guid]::NewGuid().ToString("N"))
+    $tempDir = Join-Path ([IO.Path]::GetTempPath()) ("pukbot-install-" + [Guid]::NewGuid().ToString("N"))
     $downloadPath = Join-Path $tempDir $asset
     $checksumsPath = Join-Path $tempDir "SHA256SUMS"
 
     New-Item -ItemType Directory -Path $tempDir | Out-Null
     try {
         Write-Info "detected Windows $architecture"
-        Write-Info "downloading Gitbot $versionLabel"
+        Write-Info "downloading Pukbot $versionLabel"
         Invoke-Download -Uri "$releaseUrl/SHA256SUMS" -OutFile $checksumsPath
         Invoke-Download -Uri "$releaseUrl/$asset" -OutFile $downloadPath
 
@@ -148,9 +148,9 @@ function Install-Gitbot {
         Write-Info "verified SHA-256 checksum"
 
         New-Item -ItemType Directory -Force -Path $RequestedBinDir | Out-Null
-        $destination = Join-Path $RequestedBinDir "gitbot.exe"
+        $destination = Join-Path $RequestedBinDir "pukbot.exe"
         Move-Item -LiteralPath $downloadPath -Destination $destination -Force
-        Write-Output "`nGitbot was installed to $destination"
+        Write-Output "`nPukbot was installed to $destination"
 
         $processPath = [Environment]::GetEnvironmentVariable("Path", "Process")
         if (-not (Test-PathEntry -PathValue $processPath -Entry $RequestedBinDir)) {
@@ -169,7 +169,7 @@ function Install-Gitbot {
                     [Environment]::SetEnvironmentVariable("Path", $updatedPath, "User")
                     Write-Info "added $RequestedBinDir to your user PATH"
                 }
-                Write-Warning "restart your terminal before running gitbot"
+                Write-Warning "restart your terminal before running pukbot"
             }
         }
     }
@@ -178,4 +178,4 @@ function Install-Gitbot {
     }
 }
 
-Install-Gitbot -RequestedVersion $Version -RequestedBinDir $BinDir -SkipPathUpdate:$NoModifyPath
+Install-Pukbot -RequestedVersion $Version -RequestedBinDir $BinDir -SkipPathUpdate:$NoModifyPath

@@ -2,7 +2,7 @@
 
 ## Our Pledge
 
-We pledge to make participation in Gitbot welcoming and harassment-free for
+We pledge to make participation in Pukbot welcoming and harassment-free for
 everyone, regardless of age, body size, disability, ethnicity, sex
 characteristics, gender identity and expression, experience level, education,
 socioeconomic status, nationality, appearance, race, caste, color, religion,

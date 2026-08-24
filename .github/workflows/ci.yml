@@ -206,15 +206,15 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
       - run: cargo package --locked
       - run: cargo metadata --locked --format-version 1 >/dev/null
-      - run: cargo install --path . --locked --root "${RUNNER_TEMP}/gitbot-install"
-      - run: '"${RUNNER_TEMP}/gitbot-install/bin/gitbot" --version'
-      - run: '"${RUNNER_TEMP}/gitbot-install/bin/gitbot" --help >/dev/null'
+      - run: cargo install --path . --locked --root "${RUNNER_TEMP}/pukbot-install"
+      - run: '"${RUNNER_TEMP}/pukbot-install/bin/pukbot" --version'
+      - run: '"${RUNNER_TEMP}/pukbot-install/bin/pukbot" --help >/dev/null'
       - name: Binary size budget
         env:
           BUDGET_BYTES: 10485760
         run: |
           set -euo pipefail
-          size=$(stat -c %s "${RUNNER_TEMP}/gitbot-install/bin/gitbot")
+          size=$(stat -c %s "${RUNNER_TEMP}/pukbot-install/bin/pukbot")
           test "${size}" -le "${BUDGET_BYTES}"
 
   installers:

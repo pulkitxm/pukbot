@@ -48,7 +48,7 @@ jobs:
           for _ in $(seq 1 100); do
             patch=$((patch + 1))
             next="${major}.${minor}.${patch}"
-            code=$(curl -sS -o /dev/null -w '%{http_code}' -A gitbot-release "https://crates.io/api/v1/crates/gitbot/${next}")
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -A pukbot-release "https://crates.io/api/v1/crates/pukbot/${next}")
             case "${code}" in
               404) ;;
               200) continue ;;
@@ -86,7 +86,7 @@ jobs:
           VERSION: ${{ steps.bump.outputs.version }}
         run: |
           set -euo pipefail
-          git tag -a "v${VERSION}" -m "Gitbot v${VERSION}"
+          git tag -a "v${VERSION}" -m "Pukbot v${VERSION}"
           git push origin "v${VERSION}"
 
   build:
@@ -98,24 +98,24 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            artifact: gitbot-linux-x86_64
-            binary: gitbot
+            artifact: pukbot-linux-x86_64
+            binary: pukbot
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            artifact: gitbot-linux-aarch64
-            binary: gitbot
+            artifact: pukbot-linux-aarch64
+            binary: pukbot
           - os: macos-15-intel
             target: x86_64-apple-darwin
-            artifact: gitbot-macos-x86_64
-            binary: gitbot
+            artifact: pukbot-macos-x86_64
+            binary: pukbot
           - os: macos-14
             target: aarch64-apple-darwin
-            artifact: gitbot-macos-aarch64
-            binary: gitbot
+            artifact: pukbot-macos-aarch64
+            binary: pukbot
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: gitbot-windows-x86_64.exe
-            binary: gitbot.exe
+            artifact: pukbot-windows-x86_64.exe
+            binary: pukbot.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -191,7 +191,7 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          code=$(curl -sS -o /dev/null -w '%{http_code}' -A gitbot-release "https://crates.io/api/v1/crates/gitbot/${VERSION}")
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -A pukbot-release "https://crates.io/api/v1/crates/pukbot/${VERSION}")
           test "${code}" = 200 || test "${code}" = 404
           if [ "${code}" = 404 ]; then echo "publish=true" >>"${GITHUB_OUTPUT}"; fi
       - id: crates
@@ -208,18 +208,18 @@ jobs:
           merge-multiple: true
       - name: Generate checksums
         working-directory: dist
-        run: sha256sum gitbot-* >SHA256SUMS
+        run: sha256sum pukbot-* >SHA256SUMS
       - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780
         with:
           tool: syft
       - name: Generate SBOM
-        run: syft scan dir:dist --output cyclonedx-json=dist/gitbot-sbom.cdx.json
+        run: syft scan dir:dist --output cyclonedx-json=dist/pukbot-sbom.cdx.json
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:
-          subject-path: dist/gitbot-*
+          subject-path: dist/pukbot-*
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
         with:
           tag_name: ${{ needs.version.outputs.tag }}
-          name: Gitbot ${{ needs.version.outputs.tag }}
+          name: Pukbot ${{ needs.version.outputs.tag }}
           generate_release_notes: true
           files: dist/*

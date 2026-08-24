@@ -1,5 +1,5 @@
 name: Comment
-run-name: Gitbot comment ${{ inputs.request_id }}
+run-name: Pukbot comment ${{ inputs.request_id }}
 
 on:
   workflow_dispatch:
@@ -40,13 +40,13 @@ jobs:
   comment:
     name: Post comment
     runs-on: ubuntu-latest
-    environment: gitbot-production
+    environment: pukbot-production
     steps:
       - id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
-          client-id: ${{ vars.GITBOT_CLIENT_ID }}
-          private-key: ${{ secrets.GITBOT_PRIVATE_KEY }}
+          client-id: ${{ vars.PUKBOT_CLIENT_ID }}
+          private-key: ${{ secrets.PUKBOT_PRIVATE_KEY }}
           owner: ${{ inputs.owner }}
           repositories: ${{ inputs.repository }}
           permission-issues: write
@@ -70,7 +70,7 @@ jobs:
           test -z "${REQUESTER}" || test "${REQUESTER}" = "${ACTOR}"
           test -n "${BODY//[[:space:]]/}"
           test "${#BODY}" -le 40000
-          footer='*Automated comment posted by Gitbot from an agent-assisted workflow.*'
+          footer='*Automated comment posted by Pukbot from an agent-assisted workflow.*'
           attribution="from: @${ACTOR}"
           printf '%s' "${BODY}" >body.md
           if ! grep -Fq -- "${footer}" body.md; then
@@ -83,4 +83,4 @@ jobs:
           comment_url=$(gh api --method POST \
             "repos/${OWNER}/${REPOSITORY}/issues/${NUMBER}/comments" \
             --input request.json --jq .html_url)
-          echo "gitbot-comment-url=${comment_url}"
+          echo "pukbot-comment-url=${comment_url}"

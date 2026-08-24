@@ -1,12 +1,12 @@
 [package]
-name = "gitbot"
+name = "pukbot"
 version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
-description = "Post disclosed GitHub comments through the Gitbot GitHub App"
+description = "Post disclosed GitHub comments through the Pukbot GitHub App"
 license = "MIT"
-repository = "https://github.com/pulkitxm/gitbot"
-homepage = "https://gitbot.pulkit.page"
+repository = "https://github.com/pulkitxm/pukbot"
+homepage = "https://pukbot.pulkit.page"
 readme = "README.md"
 keywords = ["github", "bot", "comments", "automation", "cli"]
 categories = ["command-line-utilities", "development-tools"]

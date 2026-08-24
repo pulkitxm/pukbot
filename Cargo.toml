@@ -1,0 +1,28 @@
+[package]
+name = "pukbot"
+version = "0.1.0"
+edition = "2024"
+description = "Post disclosed GitHub comments through the Pukbot GitHub App"
+license = "MIT"
+repository = "https://github.com/pulkitxm/Pukbot"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+strip = "symbols"
+

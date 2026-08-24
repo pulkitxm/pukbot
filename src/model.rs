@@ -873,7 +873,7 @@ mod tests {
         for document in documents {
             let request = serde_json::from_str::<Request>(document).expect("request should parse");
             let operation = request.prepare(true).expect("request should prepare");
-            assert!(!operation.name().is_empty());
+            assert_ne!(operation.name(), "");
         }
     }
 }

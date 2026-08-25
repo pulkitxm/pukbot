@@ -165,9 +165,18 @@ struct CommentReactArgs {
 
 #[derive(Debug, Args)]
 struct BodyArgs {
-    #[arg(long, conflicts_with = "body_file")]
+    #[arg(
+        long,
+        conflicts_with = "body_file",
+        help = "GitHub-flavored Markdown body, posted verbatim (code fences, tables, task lists, and every other GitHub syntax render as written)"
+    )]
     body: Option<String>,
-    #[arg(long, value_name = "FILE", conflicts_with = "body")]
+    #[arg(
+        long,
+        value_name = "FILE",
+        conflicts_with = "body",
+        help = "Read the GitHub-flavored Markdown body from FILE, or from stdin with -; preferred for multiline bodies"
+    )]
     body_file: Option<PathBuf>,
 }
 

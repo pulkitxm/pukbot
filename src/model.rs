@@ -10,6 +10,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::media;
 
 pub const MAX_BODY_BYTES: usize = 40_000;
+pub const MAX_COMMIT_MESSAGE_BYTES: usize = 8_000;
+pub const MAX_COMMIT_FILE_BYTES: usize = 60_000;
+pub const MAX_COMMIT_TOTAL_BYTES: usize = 120_000;
+pub const MAX_COMMIT_FILES: usize = 50;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Repository {
@@ -100,6 +104,22 @@ pub struct CommentDocument {
     pub body: String,
     #[serde(default)]
     pub media: Vec<media::MediaInput>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommitFileDocument {
+    pub path: String,
+    pub content: Option<String>,
+    #[serde(default)]
+    pub delete: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CommitFile {
+    pub path: String,
+    pub content: Option<String>,
+    pub delete: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -240,6 +260,12 @@ pub enum Request {
     PullRequestUpdateBranch {
         repository: Repository,
         number: NonZeroU64,
+    },
+    CommitCreate {
+        repository: Repository,
+        branch: String,
+        message: String,
+        files: Vec<CommitFileDocument>,
     },
 }
 
@@ -475,6 +501,22 @@ impl Request {
                     number,
                 })
             }
+            Self::CommitCreate {
+                repository,
+                branch,
+                message,
+                files,
+            } => {
+                validate_branch(&branch)?;
+                validate_commit_message(&message)?;
+                Ok(Operation::CommitCreate {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    branch,
+                    message,
+                    files: prepare_commit_files(files)?,
+                })
+            }
         }
     }
 }
@@ -628,6 +670,13 @@ pub enum Operation {
         repository: String,
         number: NonZeroU64,
     },
+    CommitCreate {
+        owner: String,
+        repository: String,
+        branch: String,
+        message: String,
+        files: Vec<CommitFile>,
+    },
 }
 
 impl Operation {
@@ -656,6 +705,7 @@ impl Operation {
             Self::PullRequestAssignees { .. } => "pull_request_assignees",
             Self::PullRequestReact { .. } => "pull_request_react",
             Self::PullRequestUpdateBranch { .. } => "pull_request_update_branch",
+            Self::CommitCreate { .. } => "commit_create",
         }
     }
 }
@@ -775,6 +825,89 @@ fn validate_branch(branch: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_commit_message(message: &str) -> Result<()> {
+    if message.trim().is_empty() {
+        bail!("commit message cannot be empty");
+    }
+    if message.len() > MAX_COMMIT_MESSAGE_BYTES {
+        bail!("commit message exceeds {MAX_COMMIT_MESSAGE_BYTES} bytes");
+    }
+    if message.contains('\r') {
+        bail!("commit message must use LF line endings");
+    }
+    Ok(())
+}
+
+fn validate_commit_path(path: &str) -> Result<()> {
+    if path.is_empty() || path.len() > 4096 {
+        bail!("commit file path must be between 1 and 4096 bytes");
+    }
+    if path.starts_with('/') || path.contains(['\n', '\r', '\0']) {
+        bail!("commit file path must be a relative path without control characters");
+    }
+    if path
+        .split('/')
+        .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        bail!("commit file path must not contain empty, '.', or '..' segments");
+    }
+    if path == ".git" || path.starts_with(".git/") {
+        bail!("commit file path must not target .git");
+    }
+    Ok(())
+}
+
+fn prepare_commit_files(files: Vec<CommitFileDocument>) -> Result<Vec<CommitFile>> {
+    if files.is_empty() {
+        bail!("commit requires at least one file");
+    }
+    if files.len() > MAX_COMMIT_FILES {
+        bail!("commit supports at most {MAX_COMMIT_FILES} files");
+    }
+    let mut seen = HashSet::new();
+    let mut total = 0usize;
+    let mut prepared = Vec::with_capacity(files.len());
+    for file in files {
+        validate_commit_path(&file.path)?;
+        if !seen.insert(file.path.clone()) {
+            bail!("duplicate commit file path: {}", file.path);
+        }
+        if file.delete {
+            if file.content.is_some() {
+                bail!(
+                    "commit file {} cannot set content and delete together",
+                    file.path
+                );
+            }
+            prepared.push(CommitFile {
+                path: file.path,
+                content: None,
+                delete: true,
+            });
+            continue;
+        }
+        let Some(content) = file.content else {
+            bail!("commit file {} requires content or delete", file.path);
+        };
+        if content.len() > MAX_COMMIT_FILE_BYTES {
+            bail!(
+                "commit file {} exceeds {MAX_COMMIT_FILE_BYTES} bytes",
+                file.path
+            );
+        }
+        total += content.len();
+        if total > MAX_COMMIT_TOTAL_BYTES {
+            bail!("commit files exceed {MAX_COMMIT_TOTAL_BYTES} bytes combined");
+        }
+        prepared.push(CommitFile {
+            path: file.path,
+            content: Some(content),
+            delete: false,
+        });
+    }
+    Ok(prepared)
+}
+
 fn validate_list_edit(add: &[String], remove: &[String], name: &str) -> Result<()> {
     if add.is_empty() && remove.is_empty() {
         bail!("provide at least one {name} to add or remove");
@@ -868,6 +1001,7 @@ mod tests {
             r#"{"operation":"pull_request_assignees","repository":"owner/repo","number":1,"add":[],"remove":["user"]}"#,
             r#"{"operation":"pull_request_react","repository":"owner/repo","number":1,"reaction":"eyes"}"#,
             r#"{"operation":"pull_request_update_branch","repository":"owner/repo","number":1}"#,
+            r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"data: update roster","files":[{"path":"data/members.json","content":"[]"},{"path":"data/old.json","delete":true}]}"#,
         ];
 
         for document in documents {
@@ -875,5 +1009,32 @@ mod tests {
             let operation = request.prepare(true).expect("request should prepare");
             assert_ne!(operation.name(), "");
         }
+    }
+
+    #[test]
+    fn rejects_commit_path_traversal() {
+        let request = serde_json::from_str::<Request>(
+            r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"m","files":[{"path":"../etc/passwd","content":"x"}]}"#,
+        )
+        .expect("request should parse");
+        assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn rejects_commit_file_with_content_and_delete() {
+        let request = serde_json::from_str::<Request>(
+            r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"m","files":[{"path":"a.json","content":"x","delete":true}]}"#,
+        )
+        .expect("request should parse");
+        assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn rejects_commit_with_no_files() {
+        let request = serde_json::from_str::<Request>(
+            r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"m","files":[]}"#,
+        )
+        .expect("request should parse");
+        assert!(request.prepare(true).is_err());
     }
 }

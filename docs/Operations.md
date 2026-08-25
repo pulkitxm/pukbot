@@ -197,6 +197,12 @@ Edit accepts `number` and at least one of `title`, `body`, or `base`. Review
 events are `approve`, `request_changes`, and `comment`. Requesting changes
 requires a body.
 
+Pull request operations run through the local authenticated GitHub CLI session
+rather than the Pukbot App, so the pull request author, the review, the merge
+event, and the squash commit on the base branch all belong to the
+authenticated user. Results report `"authoredBy": "user"` and a `null`
+`workflowUrl`. See [Attribution](#attribution).
+
 ## Commits
 
 ```bash
@@ -214,10 +220,34 @@ changes:
 pukbot commit create data/members.json --repo owner/repository --branch main --message "data: update roster"
 ```
 
-The commit is created and verified as the Pukbot App's bot identity, never
-your local git author. The branch ref update is never forced: if the branch
-has moved since the commit was built, the operation fails instead of
-overwriting the newer history.
+The commit records the requesting GitHub account as the commit author and the
+Pukbot App as the committer, so it appears as authored by you and committed by
+Pukbot and counts toward your contributions. Both identities are resolved
+inside the protected workflow from the requesting account and cannot be set
+from the CLI or your local git config. The branch ref update is never forced:
+if the branch has moved since the commit was built, the operation fails
+instead of overwriting the newer history.
+
+## Attribution
+
+Results report who GitHub records as the actor:
+
+```json
+{
+  "operation": "pull_request_create",
+  "authoredBy": "user",
+  "workflowUrl": null,
+  "resourceUrl": "https://github.com/owner/repository/pull/7"
+}
+```
+
+`authoredBy` is `user` for every `pr` operation, which executes locally under
+the authenticated GitHub CLI session. It is `pukbot` for every `comment`,
+`issue`, and `commit` operation, which executes inside the protected workflow
+under a short-lived App installation token; those results also carry a
+`workflowUrl`.
+
+`pukbot capabilities --json` reports the same split under `attribution`.
 
 The JSON operation is `commit_create` and accepts `branch`, `message`, and a
 `files` array of `{path, content, delete}` objects. Set `delete: true` to

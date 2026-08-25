@@ -1,5 +1,6 @@
 mod commit;
 mod completion;
+mod local;
 mod manual;
 mod media;
 mod model;
@@ -322,7 +323,8 @@ struct ReactArgs {
 #[serde(rename_all = "camelCase")]
 struct MutationResult {
     operation: String,
-    workflow_url: String,
+    authored_by: &'static str,
+    workflow_url: Option<String>,
     resource_url: Option<String>,
 }
 
@@ -333,6 +335,14 @@ struct Capabilities {
     commands: Vec<&'static str>,
     media: Vec<&'static str>,
     output: Vec<&'static str>,
+    attribution: Attribution,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Attribution {
+    user: Vec<&'static str>,
+    app: Vec<&'static str>,
 }
 
 fn main() {
@@ -676,11 +686,21 @@ fn execute(request: Request, dry_run: bool, json: bool) -> Result<()> {
     if dry_run {
         return emit_json(&operation);
     }
-    let result = workflow::dispatch(&operation, !json)?;
-    let output = MutationResult {
-        operation: operation.name().to_owned(),
-        workflow_url: result.workflow_url,
-        resource_url: result.resource_url,
+    let output = if local::runs_locally(&operation) {
+        MutationResult {
+            operation: operation.name().to_owned(),
+            authored_by: "user",
+            workflow_url: None,
+            resource_url: Some(local::execute(&operation)?),
+        }
+    } else {
+        let result = workflow::dispatch(&operation, !json)?;
+        MutationResult {
+            operation: operation.name().to_owned(),
+            authored_by: "pukbot",
+            workflow_url: Some(result.workflow_url),
+            resource_url: result.resource_url,
+        }
     };
     if json {
         emit_json(&output)
@@ -754,7 +774,10 @@ fn read_stdin_body() -> Result<String> {
 
 fn emit_text_result(result: &MutationResult) -> Result<()> {
     let mut stdout = io::stdout().lock();
-    writeln!(stdout, "Workflow run: {}", result.workflow_url)?;
+    writeln!(stdout, "Authored by: {}", result.authored_by)?;
+    if let Some(url) = &result.workflow_url {
+        writeln!(stdout, "Workflow run: {url}")?;
+    }
     if let Some(url) = &result.resource_url {
         writeln!(stdout, "Result: {url}")?;
     }
@@ -803,6 +826,36 @@ fn emit_capabilities(json: bool) -> Result<()> {
         ],
         media: media::supported_extensions(),
         output: vec!["text", "json"],
+        attribution: Attribution {
+            user: vec![
+                "pr.create",
+                "pr.edit",
+                "pr.close",
+                "pr.reopen",
+                "pr.merge",
+                "pr.ready",
+                "pr.draft",
+                "pr.review",
+                "pr.labels",
+                "pr.assignees",
+                "pr.react",
+                "pr.update-branch",
+            ],
+            app: vec![
+                "comment.create",
+                "comment.edit",
+                "comment.delete",
+                "comment.react",
+                "issue.create",
+                "issue.edit",
+                "issue.close",
+                "issue.reopen",
+                "issue.labels",
+                "issue.assignees",
+                "issue.react",
+                "commit.create",
+            ],
+        },
     };
     if json {
         emit_json(&capabilities)
@@ -812,6 +865,16 @@ fn emit_capabilities(json: bool) -> Result<()> {
         writeln!(stdout, "commands: {}", capabilities.commands.join(", "))?;
         writeln!(stdout, "media: {}", capabilities.media.join(", "))?;
         writeln!(stdout, "output: {}", capabilities.output.join(", "))?;
+        writeln!(
+            stdout,
+            "authored by you: {}",
+            capabilities.attribution.user.join(", ")
+        )?;
+        writeln!(
+            stdout,
+            "authored by pukbot: {}",
+            capabilities.attribution.app.join(", ")
+        )?;
         Ok(())
     }
 }

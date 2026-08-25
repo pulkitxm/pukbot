@@ -139,6 +139,37 @@ Edit accepts `number` and at least one of `title`, `body`, or `base`. Review
 events are `approve`, `request_changes`, and `comment`. Requesting changes
 requires a body.
 
+## Commits
+
+```bash
+git add data/members.json
+pukbot commit create --repo owner/repository --branch main --message "data: update roster"
+```
+
+`pukbot commit create` reads whatever is already staged in the local git
+index (`git diff --cached`) and commits exactly that content to the given
+branch of the target repository, atomically, through the GitHub Git Data API.
+Pass one or more pathspecs to restrict the commit to a subset of the staged
+changes:
+
+```bash
+pukbot commit create data/members.json --repo owner/repository --branch main --message "data: update roster"
+```
+
+The commit is created and verified as the Pukbot App's bot identity, never
+your local git author. The branch ref update is never forced: if the branch
+has moved since the commit was built, the operation fails instead of
+overwriting the newer history.
+
+The JSON operation is `commit_create` and accepts `branch`, `message`, and a
+`files` array of `{path, content, delete}` objects. Set `delete: true` to
+remove a path, otherwise provide `content` as UTF-8 text. At most 50 files,
+60,000 bytes per file, and 120,000 bytes combined.
+
+Only text content is supported. Staged binary files (images, video, and
+other non-UTF-8 content) are rejected before any request is sent; commit
+those with local git for now.
+
 ## Permissions
 
 The protected operation workflow requests issue, pull request, and repository

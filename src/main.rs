@@ -1,3 +1,4 @@
+mod commit;
 mod completion;
 mod manual;
 mod media;
@@ -39,6 +40,10 @@ enum Commands {
     Pr {
         #[command(subcommand)]
         command: PullRequestCommand,
+    },
+    Commit {
+        #[command(subcommand)]
+        command: CommitCommand,
     },
     Completions(CompletionsArgs),
     Man(ManArgs),
@@ -109,6 +114,11 @@ enum PullRequestCommand {
     UpdateBranch(TargetArgs),
 }
 
+#[derive(Debug, Subcommand)]
+enum CommitCommand {
+    Create(CommitCreateArgs),
+}
+
 #[derive(Debug, Args)]
 struct CommentCreateArgs {
     number: NonZeroU64,
@@ -159,6 +169,28 @@ struct BodyArgs {
     body: Option<String>,
     #[arg(long, value_name = "FILE", conflicts_with = "body")]
     body_file: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct MessageArgs {
+    #[arg(long, conflicts_with = "message_file")]
+    message: Option<String>,
+    #[arg(long = "message-file", value_name = "FILE", conflicts_with = "message")]
+    message_file: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct CommitCreateArgs {
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    branch: String,
+    #[command(flatten)]
+    content: MessageArgs,
+    #[arg(value_name = "PATH")]
+    paths: Vec<PathBuf>,
+    #[arg(long)]
+    dry_run: bool,
 }
 
 #[derive(Debug, Args)]
@@ -311,6 +343,7 @@ fn run() -> Result<()> {
         Commands::Comment { command } => run_comment(command, cli.json),
         Commands::Issue { command } => run_issue(command, cli.json),
         Commands::Pr { command } => run_pull_request(command, cli.json),
+        Commands::Commit { command } => run_commit(command, cli.json),
         Commands::Completions(args) => run_completions(args, cli.json),
         Commands::Man(args) => run_manual(args, cli.json),
         Commands::Update(args) => run_update(args, cli.json),
@@ -611,6 +644,24 @@ fn execute_pull_request_target(args: TargetArgs, json: bool, action: &str) -> Re
     execute(request, args.dry_run, json)
 }
 
+fn run_commit(command: CommitCommand, json: bool) -> Result<()> {
+    match command {
+        CommitCommand::Create(args) => {
+            let files = commit::staged_files(&args.paths)?;
+            execute(
+                Request::CommitCreate {
+                    repository: args.repo,
+                    branch: args.branch,
+                    message: read_message(&args.content)?,
+                    files,
+                },
+                args.dry_run,
+                json,
+            )
+        }
+    }
+}
+
 fn execute(request: Request, dry_run: bool, json: bool) -> Result<()> {
     let operation = request.prepare(dry_run)?;
     if dry_run {
@@ -667,6 +718,23 @@ fn read_optional_body(args: &BodyArgs) -> Result<Option<String>> {
     read_body(args).map(Some)
 }
 
+fn read_message(args: &MessageArgs) -> Result<String> {
+    if let Some(message) = &args.message {
+        return Ok(message.clone());
+    }
+    if let Some(path) = &args.message_file {
+        if path == Path::new("-") {
+            return read_stdin_body();
+        }
+        return fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()));
+    }
+    if io::stdin().is_terminal() {
+        bail!("provide --message, --message-file, or pipe the message through stdin");
+    }
+    read_stdin_body()
+}
+
 fn read_stdin_body() -> Result<String> {
     let mut body = String::new();
     io::stdin()
@@ -719,6 +787,7 @@ fn emit_capabilities(json: bool) -> Result<()> {
             "pr.assignees",
             "pr.react",
             "pr.update-branch",
+            "commit.create",
             "completions",
             "man",
             "update",

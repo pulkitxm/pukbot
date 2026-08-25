@@ -196,6 +196,33 @@ jobs:
               gh api --method PUT "repos/${slug}/pulls/${number}/update-branch" --input <(jq -n '{}') >/dev/null
               result="https://github.com/${slug}/pull/${number}"
               ;;
+            commit_create)
+              branch=$(jq -er '.branch | select(test("^[^\n\r]{1,255}$"))' payload.json)
+              jq -j '.message' payload.json >message.txt
+              base_sha=$(gh api "repos/${slug}/git/ref/heads/${branch}" --jq .object.sha)
+              base_tree=$(gh api "repos/${slug}/git/commits/${base_sha}" --jq .tree.sha)
+              entries='[]'
+              count=$(jq '.files | length' payload.json)
+              for i in $(seq 0 $((count - 1))); do
+                path=$(jq -er ".files[$i].path" payload.json)
+                delete=$(jq -r ".files[$i].delete" payload.json)
+                if [ "${delete}" = "true" ]; then
+                  entry=$(jq -n --arg path "${path}" '{path: $path, mode: "100644", type: "blob", sha: null}')
+                else
+                  jq -j ".files[$i].content" payload.json >content.txt
+                  blob_sha=$(gh api --method POST "repos/${slug}/git/blobs" -F content=@content.txt -f encoding=utf-8 --jq .sha)
+                  entry=$(jq -n --arg path "${path}" --arg sha "${blob_sha}" '{path: $path, mode: "100644", type: "blob", sha: $sha}')
+                fi
+                entries=$(jq -c --argjson entry "${entry}" '. + [$entry]' <<<"${entries}")
+              done
+              tree_sha=$(jq -n --arg base "${base_tree}" --argjson tree "${entries}" '{base_tree: $base, tree: $tree}' |
+                gh api --method POST "repos/${slug}/git/trees" --input - --jq .sha)
+              commit_sha=$(jq -n --rawfile msg message.txt --arg tree "${tree_sha}" \
+                --arg parent "${base_sha}" '{message: $msg, tree: $tree, parents: [$parent]}' |
+                gh api --method POST "repos/${slug}/git/commits" --input - --jq .sha)
+              gh api --method PATCH "repos/${slug}/git/refs/heads/${branch}" -f sha="${commit_sha}" -F force=false >/dev/null
+              result="https://github.com/${slug}/commit/${commit_sha}"
+              ;;
             *)
               printf 'unsupported operation: %s\n' "${operation}" >&2
               exit 1

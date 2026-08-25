@@ -18,8 +18,9 @@ Install the public GitHub App on the repositories where comments may be posted:
 
 [Install Pukbot on GitHub](https://github.com/apps/pukbot)
 
-Grant access only to the repositories that need Pukbot. The App requests issue
-and pull request write access so the protected workflow can post comments.
+Grant access only to the repositories that need Pukbot. The App requests
+issue, pull request, and repository content write access so the protected
+workflow can post comments and create commits.
 
 Linux and macOS:
 
@@ -144,6 +145,17 @@ pukbot issue labels 123 --repo owner/repository --add urgent --remove stale
 pukbot pr review 456 --repo owner/repository --event approve --body "looks good"
 pukbot pr merge 456 --repo owner/repository --yes
 ```
+
+Commit staged local changes to a branch as the Pukbot bot, atomically,
+through the GitHub Git Data API:
+
+```bash
+git add data/members.json
+pukbot commit create --repo owner/repository --branch main --message "data: update roster"
+```
+
+Only text content is supported today; staged binary files are rejected
+before dispatch.
 
 See [Operations](docs/Operations.md) for the complete command and JSON
 contracts.

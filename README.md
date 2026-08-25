@@ -80,6 +80,25 @@ pukbot comment create 123 --repo owner/repository --body-file comment.md
 pukbot comment create 123 --repo owner/repository <comment.md
 ```
 
+Comment, issue, pull request, and review bodies are GitHub-flavored Markdown
+posted verbatim, so code fences, tables, task lists, collapsible sections,
+alerts, and Mermaid diagrams all render out of the box:
+
+````bash
+pukbot comment create 123 --repo owner/repository --body-file - <<'EOF'
+### CI result
+
+| Check  | Status |
+| ------ | ------ |
+| fmt    | passed |
+| clippy | passed |
+
+```text
+Finished `release` profile [optimized] target(s) in 12.4s
+```
+EOF
+````
+
 Edit, delete, or react to a comment by its database ID:
 
 ```bash
@@ -185,11 +204,15 @@ Add this to `AGENTS.md`:
 Perform supported GitHub mutations through Pukbot. Do not call GitHub mutation
 commands directly.
 
-pukbot comment create <number> --repo <owner/repository> --body "<message>"
+pukbot comment create <number> --repo <owner/repository> --body "<markdown>"
 
-Use a JSON request with `pukbot apply --input <file>` for named inline media.
-Use `--json` when consuming output. Local media is uploaded publicly. Pukbot
-appends the required disclosure footer to comments.
+Bodies are GitHub-flavored Markdown posted verbatim: fence code, logs, and
+command output in code blocks with a language identifier, and use headings,
+tables, task lists, and `<details>` sections instead of plain text. Pass
+multiline bodies with `--body-file <file>` or stdin. Use a JSON request with
+`pukbot apply --input <file>` for named inline media. Use `--json` when
+consuming output. Local media is uploaded publicly. Pukbot appends the
+required disclosure footer to comments.
 ```
 
 ## Security

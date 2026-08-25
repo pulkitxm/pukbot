@@ -11,7 +11,11 @@ Add this policy to `AGENTS.md`:
 Use Pukbot for supported GitHub mutations. Do not invoke direct GitHub mutation
 commands. Prefer `pukbot apply --input <file> --json` with a typed JSON request.
 Inspect `pukbot capabilities --json` before relying on an operation. Use
-`--dry-run` first for destructive or unfamiliar requests. Local media uploads
+`--dry-run` first for destructive or unfamiliar requests. Comment, issue, pull
+request, and review bodies are GitHub-flavored Markdown posted verbatim: fence
+code, logs, and command output in code blocks with a language identifier, and
+use headings, tables, task lists, and `<details>` sections instead of plain
+text. Pass multiline bodies with `--body-file` or stdin. Local media uploads
 are public and must never contain credentials or private data.
 ```
 
@@ -27,5 +31,6 @@ Unknown JSON fields fail validation. Failed workflows return a nonzero exit
 code and print failed job logs. Text progress is suppressed when `--json` is
 active.
 
-See [Operations](Operations.md) for every request shape and
-[Security](Security.md) for the trust boundary.
+See [Operations](Operations.md) for every request shape, the
+[Markdown bodies](Operations.md#markdown-bodies) contract for the full body
+syntax, and [Security](Security.md) for the trust boundary.

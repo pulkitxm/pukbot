@@ -9,6 +9,8 @@ the canonical agent interface.
 - Repositories use `owner/name`.
 - Issue and pull request numbers start at 1.
 - Comment IDs are GitHub database IDs, not issue numbers.
+- Comment, issue, pull request, and review bodies are GitHub-flavored
+  Markdown posted verbatim. See [Markdown bodies](#markdown-bodies).
 - `--dry-run` validates input and prints the final operation without dispatching.
 - `--json` emits one result object and suppresses workflow progress.
 - Destructive comment deletion and pull request merging require `--yes`.
@@ -23,6 +25,62 @@ URL:
   "operation": "issue_create",
   "workflowUrl": "https://github.com/pulkitxm/pukbot/actions/runs/123",
   "resourceUrl": "https://github.com/owner/repository/issues/456"
+}
+```
+
+## Markdown bodies
+
+Every body field accepts the complete GitHub-flavored Markdown syntax:
+comment bodies, issue bodies, pull request descriptions, and review bodies.
+Pukbot posts them verbatim. Nothing is escaped, stripped, or rewritten, so
+everything GitHub renders works out of the box. Format bodies instead of
+posting plain text walls:
+
+- Fenced code blocks with a language identifier, such as `rust`, `bash`,
+  `json`, `diff`, or `text`. Always fence code, logs, and command output.
+- Inline code spans for identifiers, flags, and paths.
+- Headings, emphasis, blockquotes, and horizontal rules.
+- Tables, ordered and unordered lists, and task lists.
+- Links, images, and references GitHub autolinks: `#123`,
+  `owner/repository#123`, commit SHAs, and `@login` mentions. Mentions
+  notify people, so mention deliberately.
+- Collapsible `<details>` and `<summary>` sections for long output.
+- Alerts inside blockquotes: `> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`,
+  `> [!WARNING]`, and `> [!CAUTION]`.
+- Mermaid diagrams in `mermaid` code blocks, math in `$` and `$$`
+  delimiters, footnotes, emoji shortcodes such as `:rocket:`, and `<kbd>`
+  key labels.
+
+Close every code fence you open. Pukbot appends its attribution footer after
+comment bodies, and an unclosed fence swallows it.
+
+Multiline bodies are easiest to pass with `--body-file` or stdin. When a
+body must be inline, quote it with single quotes so the shell does not
+expand backticks or `$`.
+
+````bash
+pukbot comment create 123 --repo owner/repository --body-file - <<'EOF'
+### Release check failed
+
+| Check  | Status |
+| ------ | ------ |
+| fmt    | passed |
+| clippy | failed |
+
+```text
+error: unused variable: `token`
+```
+EOF
+````
+
+In JSON requests, encode newlines as `\n`:
+
+```json
+{
+  "operation": "comment_create",
+  "repository": "owner/repository",
+  "number": 123,
+  "body": "### Result\n\n```text\nall 42 checks passed\n```"
 }
 ```
 
@@ -101,7 +159,7 @@ assignee operations accept `add` and `remove` arrays.
 pukbot pr create \
   --repo owner/repository \
   --title "title" \
-  --body "one line" \
+  --body-file description.md \
   --head feature \
   --base main \
   --draft

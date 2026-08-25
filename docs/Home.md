@@ -1,7 +1,8 @@
 # Pukbot
 
 Pukbot performs typed GitHub operations through a GitHub App without exposing
-the App private key to the local CLI.
+the App private key to the local CLI. Pull request operations run as the
+authenticated user instead, so they land in that user's contribution history.
 
 - [Installation](Installation.md)
 - [Operations](Operations.md)

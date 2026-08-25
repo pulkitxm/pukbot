@@ -1,14 +1,22 @@
 # Architecture
 
-Pukbot separates public commands from private GitHub App credentials.
+Pukbot separates public commands from private GitHub App credentials, and
+separates operations authored by the user from operations authored by the App.
 
 The public Rust CLI validates typed input, resolves the authenticated GitHub
-CLI user, and dispatches the repository's `operation.yml` workflow. It never
-receives the GitHub App private key or an installation token.
+CLI user, and routes the operation. It never receives the GitHub App private
+key or an installation token.
 
-The workflow reads the private key from the protected `pukbot-production`
-environment, creates a short-lived installation token scoped to the requested
-repository, performs one validated operation, and discards the token.
+Pull request operations execute locally through the authenticated GitHub CLI
+session, so GitHub records the user as the author, reviewer, merger, and
+author of the squash commit. No workflow runs and no App token is minted.
+
+Comment, issue, and commit operations dispatch the repository's
+`operation.yml` workflow. The workflow reads the private key from the
+protected `pukbot-production` environment, creates a short-lived installation
+token scoped to the requested repository, performs one validated operation,
+and discards the token. Commits carry the requesting user as the commit author
+and the App as the committer.
 
 For local media paths, the CLI validates the file and uploads a content-named
 public asset to the `comment-assets` prerelease through the authenticated

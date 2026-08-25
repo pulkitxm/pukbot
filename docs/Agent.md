@@ -1,9 +1,11 @@
 # Agent usage
 
 Pukbot is designed so agents can perform approved GitHub mutations without
-reading the GitHub App private key or its installation token. The agent invokes
-the public CLI, the CLI dispatches a protected workflow, and the workflow mints
-one short-lived token scoped to one repository.
+reading the GitHub App private key or its installation token. For comment,
+issue, and commit operations the agent invokes the public CLI, the CLI
+dispatches a protected workflow, and the workflow mints one short-lived token
+scoped to one repository. Pull request operations run through the user's own
+authenticated GitHub CLI session so the user, not the App, is the author.
 
 Add this policy to `AGENTS.md`:
 
@@ -25,7 +27,11 @@ The stable agent sequence is:
 2. Construct exactly one JSON request with an `operation` discriminator.
 3. Run `pukbot apply --input request.json --dry-run` to validate it.
 4. Run `pukbot apply --input request.json --json` to execute it.
-5. Read `resourceUrl` from the one JSON result object.
+5. Read `resourceUrl` and `authoredBy` from the one JSON result object.
+
+`authoredBy` is `user` for locally executed pull request operations and
+`pukbot` for App operations. `workflowUrl` is `null` when no workflow runs.
+`pukbot capabilities --json` reports the split under `attribution`.
 
 Unknown JSON fields fail validation. Failed workflows return a nonzero exit
 code and print failed job logs. Text progress is suppressed when `--json` is

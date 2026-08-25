@@ -8,9 +8,14 @@
 Pukbot is an agent-first Rust CLI for typed GitHub operations through the
 Pukbot GitHub App.
 
-The CLI never receives the GitHub App private key or an installation token. A
-protected GitHub Actions environment mints a short-lived, repository-scoped
-token, performs the operation, and discards the token.
+Comment, issue, and commit operations run through the App. The CLI never
+receives the GitHub App private key or an installation token. A protected
+GitHub Actions environment mints a short-lived, repository-scoped token,
+performs the operation, and discards the token.
+
+Pull request operations run through your own authenticated GitHub CLI session
+instead, so GitHub records you as the pull request author. See
+[Attribution](#attribution).
 
 ## Install
 
@@ -19,8 +24,8 @@ Install the public GitHub App on the repositories where comments may be posted:
 [Install Pukbot on GitHub](https://github.com/apps/pukbot)
 
 Grant access only to the repositories that need Pukbot. The App requests
-issue, pull request, and repository content write access so the protected
-workflow can post comments and create commits.
+issue and repository content write access so the protected workflow can post
+comments and create commits.
 
 Linux and macOS:
 
@@ -189,12 +194,45 @@ Every comment ends with:
 from: @authenticated-user
 ```
 
-The CLI follows the workflow, streams its status, shows failed logs, returns a
-failing exit code on failure, and prints the posted comment URL on success.
+For App operations the CLI follows the workflow, streams its status, shows
+failed logs, returns a failing exit code on failure, and prints the posted
+comment URL on success.
 
 GitHub CLI must be installed and authenticated. The authenticated user needs
 permission to dispatch the Operation workflow in `pulkitxm/pukbot`. Local
 media uploads also require permission to upload release assets there.
+
+## Attribution
+
+Every operation is either authored by you or authored by the App, and the
+result reports which:
+
+```json
+{
+  "operation": "pull_request_create",
+  "authoredBy": "user",
+  "workflowUrl": null,
+  "resourceUrl": "https://github.com/owner/repository/pull/7"
+}
+```
+
+Authored by you, executed through your local authenticated GitHub CLI session:
+
+- every `pr` operation, including `create`, `review`, and `merge`
+
+The pull request author, the reviewer, the merge event, and the squash commit
+on the base branch are all yours, so the work lands in your GitHub
+contribution history. `workflowUrl` is `null` because no workflow runs.
+
+Authored by the Pukbot App, executed inside the protected workflow:
+
+- every `comment` and `issue` operation
+- `commit create`
+
+`commit create` records you as the commit author and the App as the committer,
+so the commit shows as authored by you and committed by Pukbot, and it counts
+toward your contributions. The author identity is derived from the requesting
+account inside the workflow and cannot be set from the CLI.
 
 ## Agent instructions
 

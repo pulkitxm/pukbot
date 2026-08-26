@@ -39,6 +39,7 @@ jobs:
           repositories: ${{ fromJSON(inputs.payload).repository }}
           permission-contents: write
           permission-issues: write
+          permission-pull-requests: write
       - name: Execute typed operation
         env:
           ACTOR: ${{ github.actor }}

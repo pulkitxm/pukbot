@@ -247,6 +247,53 @@ jobs:
               gh api --method DELETE "repos/${slug}/git/refs/tags/${encoded_tag}" >/dev/null
               result="https://github.com/${slug}/tags"
               ;;
+            release_create)
+              jq '{
+                tag_name: .tag,
+                name,
+                body,
+                target_commitish: .target,
+                draft,
+                prerelease,
+                generate_release_notes: .generate_notes
+              } | with_entries(select(.value != null))' payload.json >request.json
+              result=$(gh api --method POST "repos/${slug}/releases" --input request.json --jq .html_url)
+              ;;
+            release_edit)
+              release_id=$(jq -er '.release_id | select(. >= 1)' payload.json)
+              jq '{
+                tag_name: .tag,
+                name,
+                body,
+                draft,
+                prerelease,
+                make_latest
+              } | with_entries(select(.value != null))' payload.json >request.json
+              result=$(gh api --method PATCH "repos/${slug}/releases/${release_id}" --input request.json --jq .html_url)
+              ;;
+            release_delete)
+              release_id=$(jq -er '.release_id | select(. >= 1)' payload.json)
+              result=$(gh api "repos/${slug}/releases/${release_id}" --jq .html_url)
+              gh api --method DELETE "repos/${slug}/releases/${release_id}" >/dev/null
+              ;;
+            release_asset_upload)
+              release_id=$(jq -er '.release_id | select(. >= 1)' payload.json)
+              name=$(jq -er '.name | select(length > 0 and length <= 255)' payload.json)
+              label=$(jq -r '.label // empty' payload.json)
+              content_type=$(jq -er '.content_type | select(length > 0 and length <= 255)' payload.json)
+              jq -j '.content_base64' payload.json | base64 --decode >asset.bin
+              test -s asset.bin
+              test "$(wc -c <asset.bin)" -le 40000
+              encoded_name=$(jq -rn --arg value "${name}" '$value | @uri')
+              endpoint="repos/${slug}/releases/${release_id}/assets?name=${encoded_name}"
+              if [ -n "${label}" ]; then
+                encoded_label=$(jq -rn --arg value "${label}" '$value | @uri')
+                endpoint="${endpoint}&label=${encoded_label}"
+              fi
+              result=$(gh api --hostname uploads.github.com --method POST \
+                -H "Content-Type: ${content_type}" --input asset.bin "${endpoint}" \
+                --jq .browser_download_url)
+              ;;
             workflow_dispatch)
               workflow=$(jq -er \
                 '.workflow | select(test("^[A-Za-z0-9_.-]{1,255}$") and . != "." and . != "..")' \

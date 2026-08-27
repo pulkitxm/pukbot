@@ -4,6 +4,7 @@ mod local;
 mod manual;
 mod media;
 mod model;
+mod release_asset;
 mod update;
 mod workflow;
 mod workflow_run;
@@ -18,7 +19,9 @@ use std::{fs, process};
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use clap_complete::Shell;
-use model::{CommentDocument, MAX_BODY_BYTES, Reaction, Repository, Request, ReviewEvent};
+use model::{
+    CommentDocument, MAX_BODY_BYTES, Reaction, ReleaseLatest, Repository, Request, ReviewEvent,
+};
 use serde::Serialize;
 
 const ABOUT: &str = "Pukbot performs typed GitHub operations through the Pukbot GitHub App.
@@ -86,6 +89,10 @@ enum Commands {
     Tag {
         #[command(subcommand)]
         command: TagCommand,
+    },
+    Release {
+        #[command(subcommand)]
+        command: ReleaseCommand,
     },
     Workflow {
         #[command(subcommand)]
@@ -180,6 +187,14 @@ enum GitRefCommand {
 enum TagCommand {
     Create(TagCreateArgs),
     Delete(TagDeleteArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum ReleaseCommand {
+    Create(ReleaseCreateArgs),
+    Edit(ReleaseEditArgs),
+    Delete(ReleaseDeleteArgs),
+    UploadAsset(ReleaseAssetUploadArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -359,6 +374,86 @@ struct TagDeleteArgs {
     repo: Repository,
     #[arg(long)]
     yes: bool,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct ReleaseCreateArgs {
+    #[arg(value_name = "TAG")]
+    tag: String,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    name: Option<String>,
+    #[command(flatten)]
+    content: BodyArgs,
+    #[arg(long, value_name = "BRANCH_OR_SHA")]
+    target: Option<String>,
+    #[command(flatten)]
+    flags: ReleaseCreateFlags,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct ReleaseCreateFlags {
+    #[arg(long)]
+    draft: bool,
+    #[arg(long)]
+    prerelease: bool,
+    #[arg(long)]
+    generate_notes: bool,
+}
+
+#[derive(Debug, Args)]
+struct ReleaseEditArgs {
+    #[arg(value_name = "RELEASE_ID")]
+    release_id: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    tag: Option<String>,
+    #[arg(long)]
+    name: Option<String>,
+    #[command(flatten)]
+    content: BodyArgs,
+    #[arg(long, value_name = "BOOL")]
+    draft: Option<bool>,
+    #[arg(long, value_name = "BOOL")]
+    prerelease: Option<bool>,
+    #[arg(long, value_enum)]
+    make_latest: Option<ReleaseLatest>,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct ReleaseDeleteArgs {
+    #[arg(value_name = "RELEASE_ID")]
+    release_id: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    yes: bool,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct ReleaseAssetUploadArgs {
+    #[arg(value_name = "RELEASE_ID")]
+    release_id: NonZeroU64,
+    #[arg(value_name = "PATH")]
+    path: PathBuf,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    name: Option<String>,
+    #[arg(long)]
+    label: Option<String>,
+    #[arg(long)]
+    content_type: Option<String>,
     #[arg(long)]
     dry_run: bool,
 }
@@ -597,6 +692,7 @@ fn run() -> Result<()> {
         Commands::Repository { command } => run_repository(command, cli.json),
         Commands::Ref { command } => run_git_ref(command, cli.json),
         Commands::Tag { command } => run_tag(command, cli.json),
+        Commands::Release { command } => run_release(command, cli.json),
         Commands::Workflow { command } => run_workflow(command, cli.json),
         Commands::Completions(args) => run_completions(args, cli.json),
         Commands::Man(args) => run_manual(args, cli.json),
@@ -991,6 +1087,68 @@ fn run_tag(command: TagCommand, json: bool) -> Result<()> {
     }
 }
 
+fn run_release(command: ReleaseCommand, json: bool) -> Result<()> {
+    match command {
+        ReleaseCommand::Create(args) => execute(
+            Request::ReleaseCreate {
+                repository: args.repo,
+                tag: args.tag,
+                name: args.name,
+                body: read_optional_body(&args.content)?,
+                target: args.target,
+                draft: args.flags.draft,
+                prerelease: args.flags.prerelease,
+                generate_notes: args.flags.generate_notes,
+            },
+            args.dry_run,
+            json,
+        ),
+        ReleaseCommand::Edit(args) => execute(
+            Request::ReleaseEdit {
+                repository: args.repo,
+                release_id: args.release_id,
+                tag: args.tag,
+                name: args.name,
+                body: read_optional_body(&args.content)?,
+                draft: args.draft,
+                prerelease: args.prerelease,
+                make_latest: args.make_latest,
+            },
+            args.dry_run,
+            json,
+        ),
+        ReleaseCommand::Delete(args) => {
+            if !args.yes && !args.dry_run {
+                bail!("release deletion requires --yes");
+            }
+            execute(
+                Request::ReleaseDelete {
+                    repository: args.repo,
+                    release_id: args.release_id,
+                },
+                args.dry_run,
+                json,
+            )
+        }
+        ReleaseCommand::UploadAsset(args) => {
+            let asset =
+                release_asset::prepare(&args.path, args.name, args.label, args.content_type)?;
+            execute(
+                Request::ReleaseAssetUpload {
+                    repository: args.repo,
+                    release_id: args.release_id,
+                    name: asset.name,
+                    label: asset.label,
+                    content_type: asset.content_type,
+                    content_base64: asset.content_base64,
+                },
+                args.dry_run,
+                json,
+            )
+        }
+    }
+}
+
 fn run_workflow(command: WorkflowCommand, json: bool) -> Result<()> {
     match command {
         WorkflowCommand::Dispatch(args) => {
@@ -1329,6 +1487,10 @@ fn capabilities() -> Capabilities {
             "ref.delete",
             "tag.create",
             "tag.delete",
+            "release.create",
+            "release.edit",
+            "release.delete",
+            "release.upload-asset",
             "workflow.dispatch",
             "workflow.cancel",
             "workflow.rerun",
@@ -1377,6 +1539,10 @@ fn capabilities() -> Capabilities {
                 "ref.delete",
                 "tag.create",
                 "tag.delete",
+                "release.create",
+                "release.edit",
+                "release.delete",
+                "release.upload-asset",
                 "workflow.dispatch",
                 "workflow.cancel",
                 "workflow.rerun",

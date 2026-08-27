@@ -216,7 +216,8 @@ authenticated user. Results report `"authoredBy": "user"` and a `null`
 `workflowUrl`. Create, edit, merge, review, and update-branch accept `--as-app`
 to run through the protected workflow as Pukbot instead. The matching JSON
 operations accept `"as_app": true`. App merges always use squash merge. See
-[Attribution](#attribution).
+[Attribution](#attribution). Pukbot supplies the squash title and an empty
+message explicitly so GitHub does not add generated attribution trailers.
 
 Pull request descriptions and review bodies receive no disclosure footer. Task
 lists in a description feed the pull request task counter.

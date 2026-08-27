@@ -158,6 +158,108 @@ jobs:
                 --input request.json >/dev/null
               result="https://github.com/${slug}/issues/${number}"
               ;;
+            issue_batch | pull_request_batch)
+              kind=issue
+              if [ "${operation}" = pull_request_batch ]; then kind=pull_request; fi
+              allow_partial=$(jq -r '.allow_partial' payload.json)
+              jq -j '.comment // empty' payload.json >batch-comment.txt
+              if [ -s batch-comment.txt ]; then
+                printf '\n\n---\n\n%s\n\n%s\n' "${footer}" "${attribution}" >>batch-comment.txt
+                jq -n --rawfile body batch-comment.txt '{body: $body}' >batch-comment.json
+              fi
+              jq '{labels: .add_labels}' payload.json >batch-add-labels.json
+              jq '{assignees: .add_assignees}' payload.json >batch-add-assignees.json
+              jq '{assignees: .remove_assignees}' payload.json >batch-remove-assignees.json
+              results='[]'
+              failures=0
+              successes=0
+              while IFS= read -r number; do
+                failure=
+                target_url="https://github.com/${slug}/issues/${number}"
+                if [ "${kind}" = pull_request ]; then
+                  target_url="https://github.com/${slug}/pull/${number}"
+                fi
+                if ! target=$(gh api "repos/${slug}/issues/${number}" 2>/dev/null); then
+                  failure="target was not found"
+                else
+                  is_pull_request=$(jq 'has("pull_request")' <<<"${target}")
+                  if [ "${kind}" = issue ] && [ "${is_pull_request}" = true ]; then
+                    failure="target is a pull request"
+                  fi
+                  if [ "${kind}" = pull_request ] && [ "${is_pull_request}" = false ]; then
+                    failure="target is an issue"
+                  fi
+                fi
+                if [ -z "${failure}" ] && [ -s batch-comment.txt ]; then
+                  if ! gh api --method POST "repos/${slug}/issues/${number}/comments" \
+                    --input batch-comment.json >/dev/null; then
+                    failure="comment failed"
+                  fi
+                fi
+                if [ -z "${failure}" ] && [ "$(jq '.labels | length' batch-add-labels.json)" -gt 0 ]; then
+                  if ! gh api --method POST "repos/${slug}/issues/${number}/labels" \
+                    --input batch-add-labels.json >/dev/null; then
+                    failure="adding labels failed"
+                  fi
+                fi
+                if [ -z "${failure}" ]; then
+                  while IFS= read -r label; do
+                    encoded=$(jq -rn --arg value "${label}" '$value | @uri')
+                    if ! gh api --method DELETE \
+                      "repos/${slug}/issues/${number}/labels/${encoded}" >/dev/null; then
+                      failure="removing label failed"
+                      break
+                    fi
+                  done < <(jq -r '.remove_labels[]' payload.json)
+                fi
+                if [ -z "${failure}" ] && [ "$(jq '.assignees | length' batch-add-assignees.json)" -gt 0 ]; then
+                  if ! gh api --method POST "repos/${slug}/issues/${number}/assignees" \
+                    --input batch-add-assignees.json >/dev/null; then
+                    failure="adding assignees failed"
+                  fi
+                fi
+                if [ -z "${failure}" ] && [ "$(jq '.assignees | length' batch-remove-assignees.json)" -gt 0 ]; then
+                  if ! gh api --method DELETE "repos/${slug}/issues/${number}/assignees" \
+                    --input batch-remove-assignees.json >/dev/null; then
+                    failure="removing assignees failed"
+                  fi
+                fi
+                if [ -z "${failure}" ] && [ "$(jq -r '.close' payload.json)" = true ]; then
+                  if ! gh api --method PATCH "repos/${slug}/issues/${number}" \
+                    -f state=closed >/dev/null; then
+                    failure="closing target failed"
+                  fi
+                fi
+                if [ -z "${failure}" ] && [ "$(jq -r '.lock' payload.json)" = true ]; then
+                  jq '{lock_reason} | with_entries(select(.value != null))' payload.json >batch-lock.json
+                  if ! gh api --method PUT "repos/${slug}/issues/${number}/lock" \
+                    --input batch-lock.json >/dev/null; then
+                    failure="locking target failed"
+                  fi
+                fi
+                if [ -n "${failure}" ]; then
+                  failures=$((failures + 1))
+                  printf 'batch %s #%s: failure, %s\n' "${kind}" "${number}" "${failure}"
+                  item=$(jq -cn --argjson number "${number}" --arg url "${target_url}" \
+                    --arg error "${failure}" \
+                    '{number: $number, url: $url, status: "failure", error: $error}')
+                else
+                  successes=$((successes + 1))
+                  printf 'batch %s #%s: success, %s\n' "${kind}" "${number}" "${target_url}"
+                  item=$(jq -cn --argjson number "${number}" --arg url "${target_url}" \
+                    '{number: $number, url: $url, status: "success"}')
+                fi
+                results=$(jq -c --argjson item "${item}" '. + [$item]' <<<"${results}")
+              done < <(jq -r '.numbers[]' payload.json)
+              printf 'pukbot-batch-result=%s\n' "${results}"
+              printf 'batch %s complete: %s succeeded, %s failed\n' \
+                "${kind}" "${successes}" "${failures}"
+              result="https://github.com/${slug}/issues"
+              if [ "${failures}" -gt 0 ] && [ "${allow_partial}" != true ]; then
+                printf 'batch failed because one or more targets failed\n' >&2
+                exit 1
+              fi
+              ;;
             pull_request_create)
               test "$(jq -r '.as_app' payload.json)" = true
               jq '{title, body, head, base, draft} | with_entries(select(.value != null))' payload.json >request.json

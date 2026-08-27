@@ -21,6 +21,7 @@ pub const MAX_REPOSITORY_DISPATCH_PROPERTIES: usize = 10;
 pub const MAX_REPOSITORY_DISPATCH_PAYLOAD_CHARS: usize = 65_535;
 pub const MAX_RELEASE_ASSET_BYTES: usize = 40_000;
 pub const MAX_WIKI_DELETE_PATHS: usize = 500;
+pub const MAX_BATCH_TARGETS: usize = 50;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Repository {
@@ -111,6 +112,15 @@ pub enum ReleaseLatest {
     True,
     False,
     Legacy,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum LockReason {
+    OffTopic,
+    TooHeated,
+    Resolved,
+    Spam,
 }
 
 #[derive(Debug, Deserialize)]
@@ -209,6 +219,26 @@ pub enum Request {
         number: NonZeroU64,
         reaction: Reaction,
     },
+    IssueBatch {
+        repository: Repository,
+        numbers: Vec<NonZeroU64>,
+        comment: Option<String>,
+        #[serde(default)]
+        add_labels: Vec<String>,
+        #[serde(default)]
+        remove_labels: Vec<String>,
+        #[serde(default)]
+        add_assignees: Vec<String>,
+        #[serde(default)]
+        remove_assignees: Vec<String>,
+        #[serde(default)]
+        close: bool,
+        #[serde(default)]
+        lock: bool,
+        lock_reason: Option<LockReason>,
+        #[serde(default)]
+        allow_partial: bool,
+    },
     PullRequestCreate {
         repository: Repository,
         title: String,
@@ -285,6 +315,26 @@ pub enum Request {
         number: NonZeroU64,
         #[serde(default)]
         as_app: bool,
+    },
+    PullRequestBatch {
+        repository: Repository,
+        numbers: Vec<NonZeroU64>,
+        comment: Option<String>,
+        #[serde(default)]
+        add_labels: Vec<String>,
+        #[serde(default)]
+        remove_labels: Vec<String>,
+        #[serde(default)]
+        add_assignees: Vec<String>,
+        #[serde(default)]
+        remove_assignees: Vec<String>,
+        #[serde(default)]
+        close: bool,
+        #[serde(default)]
+        lock: bool,
+        lock_reason: Option<LockReason>,
+        #[serde(default)]
+        allow_partial: bool,
     },
     CommitCreate {
         repository: Repository,
@@ -506,6 +556,34 @@ impl Request {
                 number,
                 reaction,
             }),
+            Self::IssueBatch {
+                repository,
+                numbers,
+                comment,
+                add_labels,
+                remove_labels,
+                add_assignees,
+                remove_assignees,
+                close,
+                lock,
+                lock_reason,
+                allow_partial,
+            } => prepare_batch(
+                repository,
+                BatchInput {
+                    numbers,
+                    comment,
+                    add_labels,
+                    remove_labels,
+                    add_assignees,
+                    remove_assignees,
+                    close,
+                    lock,
+                    lock_reason,
+                    allow_partial,
+                },
+                false,
+            ),
             Self::PullRequestCreate {
                 repository,
                 title,
@@ -640,6 +718,34 @@ impl Request {
                 number,
                 as_app,
             }),
+            Self::PullRequestBatch {
+                repository,
+                numbers,
+                comment,
+                add_labels,
+                remove_labels,
+                add_assignees,
+                remove_assignees,
+                close,
+                lock,
+                lock_reason,
+                allow_partial,
+            } => prepare_batch(
+                repository,
+                BatchInput {
+                    numbers,
+                    comment,
+                    add_labels,
+                    remove_labels,
+                    add_assignees,
+                    remove_assignees,
+                    close,
+                    lock,
+                    lock_reason,
+                    allow_partial,
+                },
+                true,
+            ),
             Self::CommitCreate {
                 repository,
                 branch,
@@ -974,6 +1080,20 @@ pub enum Operation {
         number: NonZeroU64,
         reaction: Reaction,
     },
+    IssueBatch {
+        owner: String,
+        repository: String,
+        numbers: Vec<NonZeroU64>,
+        comment: Option<String>,
+        add_labels: Vec<String>,
+        remove_labels: Vec<String>,
+        add_assignees: Vec<String>,
+        remove_assignees: Vec<String>,
+        close: bool,
+        lock: bool,
+        lock_reason: Option<LockReason>,
+        allow_partial: bool,
+    },
     PullRequestCreate {
         owner: String,
         repository: String,
@@ -1052,6 +1172,20 @@ pub enum Operation {
         repository: String,
         number: NonZeroU64,
         as_app: bool,
+    },
+    PullRequestBatch {
+        owner: String,
+        repository: String,
+        numbers: Vec<NonZeroU64>,
+        comment: Option<String>,
+        add_labels: Vec<String>,
+        remove_labels: Vec<String>,
+        add_assignees: Vec<String>,
+        remove_assignees: Vec<String>,
+        close: bool,
+        lock: bool,
+        lock_reason: Option<LockReason>,
+        allow_partial: bool,
     },
     CommitCreate {
         owner: String,
@@ -1182,6 +1316,7 @@ impl Operation {
             Self::IssueLabels { .. } => "issue_labels",
             Self::IssueAssignees { .. } => "issue_assignees",
             Self::IssueReact { .. } => "issue_react",
+            Self::IssueBatch { .. } => "issue_batch",
             Self::PullRequestCreate { .. } => "pull_request_create",
             Self::PullRequestEdit { .. } => "pull_request_edit",
             Self::PullRequestClose { .. } => "pull_request_close",
@@ -1194,6 +1329,7 @@ impl Operation {
             Self::PullRequestAssignees { .. } => "pull_request_assignees",
             Self::PullRequestReact { .. } => "pull_request_react",
             Self::PullRequestUpdateBranch { .. } => "pull_request_update_branch",
+            Self::PullRequestBatch { .. } => "pull_request_batch",
             Self::CommitCreate { .. } => "commit_create",
             Self::WikiPublish { .. } => "wiki_publish",
             Self::RepositoryDispatch { .. } => "repository_dispatch",
@@ -1284,6 +1420,96 @@ fn prepare_assignees(
             remove,
         })
     }
+}
+
+struct BatchInput {
+    numbers: Vec<NonZeroU64>,
+    comment: Option<String>,
+    add_labels: Vec<String>,
+    remove_labels: Vec<String>,
+    add_assignees: Vec<String>,
+    remove_assignees: Vec<String>,
+    close: bool,
+    lock: bool,
+    lock_reason: Option<LockReason>,
+    allow_partial: bool,
+}
+
+fn prepare_batch(
+    repository: Repository,
+    input: BatchInput,
+    pull_request: bool,
+) -> Result<Operation> {
+    if input.numbers.is_empty() || input.numbers.len() > MAX_BATCH_TARGETS {
+        bail!("batch operations require 1 to {MAX_BATCH_TARGETS} target numbers");
+    }
+    let unique_numbers = input.numbers.iter().collect::<HashSet<_>>();
+    if unique_numbers.len() != input.numbers.len() {
+        bail!("batch target numbers must be unique");
+    }
+    if let Some(comment) = &input.comment {
+        validate_body(comment)?;
+    }
+    validate_batch_values(&input.add_labels, &input.remove_labels, "label")?;
+    validate_batch_values(&input.add_assignees, &input.remove_assignees, "assignee")?;
+    if input.lock_reason.is_some() && !input.lock {
+        bail!("batch lock reason requires lock");
+    }
+    if input.comment.is_none()
+        && input.add_labels.is_empty()
+        && input.remove_labels.is_empty()
+        && input.add_assignees.is_empty()
+        && input.remove_assignees.is_empty()
+        && !input.close
+        && !input.lock
+    {
+        bail!("batch operation requires at least one mutation");
+    }
+    if pull_request {
+        Ok(Operation::PullRequestBatch {
+            owner: repository.owner,
+            repository: repository.name,
+            numbers: input.numbers,
+            comment: input.comment,
+            add_labels: input.add_labels,
+            remove_labels: input.remove_labels,
+            add_assignees: input.add_assignees,
+            remove_assignees: input.remove_assignees,
+            close: input.close,
+            lock: input.lock,
+            lock_reason: input.lock_reason,
+            allow_partial: input.allow_partial,
+        })
+    } else {
+        Ok(Operation::IssueBatch {
+            owner: repository.owner,
+            repository: repository.name,
+            numbers: input.numbers,
+            comment: input.comment,
+            add_labels: input.add_labels,
+            remove_labels: input.remove_labels,
+            add_assignees: input.add_assignees,
+            remove_assignees: input.remove_assignees,
+            close: input.close,
+            lock: input.lock,
+            lock_reason: input.lock_reason,
+            allow_partial: input.allow_partial,
+        })
+    }
+}
+
+fn validate_batch_values(add: &[String], remove: &[String], name: &str) -> Result<()> {
+    validate_values(add, name)?;
+    validate_values(remove, name)?;
+    let add_values = add.iter().collect::<HashSet<_>>();
+    let remove_values = remove.iter().collect::<HashSet<_>>();
+    if add_values.len() != add.len() || remove_values.len() != remove.len() {
+        bail!("batch {name} values must be unique");
+    }
+    if add_values.iter().any(|value| remove_values.contains(value)) {
+        bail!("batch cannot add and remove the same {name}");
+    }
+    Ok(())
 }
 
 fn validate_edit(title: Option<&str>, body: Option<&str>) -> Result<()> {
@@ -1785,6 +2011,7 @@ mod tests {
             r#"{"operation":"issue_labels","repository":"owner/repo","number":1,"add":["bug"],"remove":["help wanted"]}"#,
             r#"{"operation":"issue_assignees","repository":"owner/repo","number":1,"add":["owner"],"remove":["user"]}"#,
             r#"{"operation":"issue_react","repository":"owner/repo","number":1,"reaction":"rocket"}"#,
+            r#"{"operation":"issue_batch","repository":"owner/repo","numbers":[1,2],"comment":"updated","add_labels":["batch"],"close":true}"#,
             r#"{"operation":"pull_request_create","repository":"owner/repo","title":"title","body":"body","head":"feature","base":"main","draft":true}"#,
             r#"{"operation":"pull_request_edit","repository":"owner/repo","number":1,"title":"title","body":"body","base":"main"}"#,
             r#"{"operation":"pull_request_close","repository":"owner/repo","number":1}"#,
@@ -1797,6 +2024,7 @@ mod tests {
             r#"{"operation":"pull_request_assignees","repository":"owner/repo","number":1,"add":[],"remove":["user"]}"#,
             r#"{"operation":"pull_request_react","repository":"owner/repo","number":1,"reaction":"eyes"}"#,
             r#"{"operation":"pull_request_update_branch","repository":"owner/repo","number":1}"#,
+            r#"{"operation":"pull_request_batch","repository":"owner/repo","numbers":[3,4],"remove_labels":["batch"],"lock":true,"lock_reason":"resolved","allow_partial":true}"#,
             r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"data: update roster","files":[{"path":"data/members.json","content":"[]"},{"path":"data/old.json","delete":true}]}"#,
             r#"{"operation":"wiki_publish","repository":"owner/repo","message":"docs: publish wiki","source_ref":"main","source_path":"wiki","delete":["Old.md"],"replace":false}"#,
             r#"{"operation":"repository_dispatch","repository":"owner/repo","event_type":"apt-release","client_payload":{"version":"1.2.3"}}"#,
@@ -1874,6 +2102,49 @@ mod tests {
         )
         .expect("request should parse");
         assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn serializes_batch_contracts() {
+        let request = serde_json::from_str::<Request>(
+            r#"{"operation":"pull_request_batch","repository":"owner/repo","numbers":[1,2],"comment":"done","add_labels":["ready"],"remove_labels":[],"add_assignees":["owner"],"remove_assignees":[],"close":true,"lock":true,"lock_reason":"resolved","allow_partial":true}"#,
+        )
+        .expect("request should parse");
+        assert_eq!(
+            serde_json::to_value(request.prepare(true).expect("request should prepare"))
+                .expect("operation should serialize"),
+            serde_json::json!({
+                "operation": "pull_request_batch",
+                "owner": "owner",
+                "repository": "repo",
+                "numbers": [1, 2],
+                "comment": "done",
+                "add_labels": ["ready"],
+                "remove_labels": [],
+                "add_assignees": ["owner"],
+                "remove_assignees": [],
+                "close": true,
+                "lock": true,
+                "lock_reason": "resolved",
+                "allow_partial": true
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_batch_requests() {
+        let documents = [
+            r#"{"operation":"issue_batch","repository":"owner/repo","numbers":[],"close":true}"#,
+            r#"{"operation":"issue_batch","repository":"owner/repo","numbers":[1,1],"close":true}"#,
+            r#"{"operation":"issue_batch","repository":"owner/repo","numbers":[1]}"#,
+            r#"{"operation":"issue_batch","repository":"owner/repo","numbers":[1],"lock_reason":"spam"}"#,
+            r#"{"operation":"issue_batch","repository":"owner/repo","numbers":[1],"add_labels":["x"],"remove_labels":["x"]}"#,
+            r#"{"operation":"pull_request_batch","repository":"owner/repo","numbers":[1],"comment":""}"#,
+        ];
+        for document in documents {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            assert!(request.prepare(true).is_err(), "{document}");
+        }
     }
 
     #[test]

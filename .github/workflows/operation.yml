@@ -172,7 +172,10 @@ jobs:
             pull_request_merge)
               test "$(jq -r '.as_app' payload.json)" = true
               number=$(jq -er '.number | select(. >= 1)' payload.json)
-              jq -n '{merge_method: "squash"}' >request.json
+              title=$(gh api "repos/${slug}/pulls/${number}" --jq .title)
+              commit_title="${title} (#${number})"
+              jq -n --arg title "${commit_title}" \
+                '{merge_method: "squash", commit_title: $title, commit_message: ""}' >request.json
               gh api --method PUT "repos/${slug}/pulls/${number}/merge" --input request.json >/dev/null
               result="https://github.com/${slug}/pull/${number}"
               ;;

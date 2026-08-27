@@ -288,7 +288,8 @@ contribution history. `workflowUrl` is `null` because no workflow runs.
 
 Pull request create, edit, review, update-branch, and merge accept `--as-app`.
 That explicit mode executes through the protected workflow, records Pukbot as
-the GitHub actor, and returns the workflow URL. App merges remain squash-only.
+the GitHub actor, and returns the workflow URL. App merges remain squash-only,
+with an explicit commit message that prevents generated attribution trailers.
 
 Authored by the Pukbot App, executed inside the protected workflow:
 

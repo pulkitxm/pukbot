@@ -100,10 +100,16 @@ pub fn execute(operation: &Operation) -> Result<String> {
             as_app: _,
         } => {
             let slug = slug(owner, repository);
+            let path = format!("repos/{slug}/pulls/{number}");
+            let title = api("GET", &path, None, Some(".title"))?;
             api(
                 "PUT",
-                &format!("repos/{slug}/pulls/{number}/merge"),
-                Some(&json!({"merge_method": "squash"})),
+                &format!("{path}/merge"),
+                Some(&json!({
+                    "merge_method": "squash",
+                    "commit_title": squash_title(&title, number.get()),
+                    "commit_message": ""
+                })),
                 None,
             )?;
             Ok(pull_request_url(&slug, number.get()))
@@ -288,6 +294,10 @@ fn pull_request_url(slug: &str, number: u64) -> String {
     format!("https://github.com/{slug}/pull/{number}")
 }
 
+fn squash_title(title: &str, number: u64) -> String {
+    format!("{title} (#{number})")
+}
+
 const fn review_event(event: ReviewEvent) -> &'static str {
     match event {
         ReviewEvent::Approve => "APPROVE",
@@ -323,7 +333,7 @@ fn encode_path_segment(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{encode_path_segment, pull_request_url, review_event, runs_locally};
+    use super::{encode_path_segment, pull_request_url, review_event, runs_locally, squash_title};
     use crate::model::{Request, ReviewEvent};
 
     #[test]
@@ -337,6 +347,14 @@ mod tests {
         assert_eq!(
             pull_request_url("owner/repository", 7),
             "https://github.com/owner/repository/pull/7"
+        );
+    }
+
+    #[test]
+    fn builds_squash_titles_without_attribution() {
+        assert_eq!(
+            squash_title("feat: add operation", 7),
+            "feat: add operation (#7)"
         );
     }
 

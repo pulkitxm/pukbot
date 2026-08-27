@@ -277,6 +277,27 @@ pub enum Request {
         #[serde(default)]
         client_payload: BTreeMap<String, serde_json::Value>,
     },
+    RefCreate {
+        repository: Repository,
+        #[serde(rename = "ref")]
+        reference: String,
+        sha: String,
+    },
+    RefDelete {
+        repository: Repository,
+        #[serde(rename = "ref")]
+        reference: String,
+    },
+    TagCreate {
+        repository: Repository,
+        tag: String,
+        target: String,
+        message: Option<String>,
+    },
+    TagDelete {
+        repository: Repository,
+        tag: String,
+    },
     WorkflowDispatch {
         repository: Repository,
         workflow: String,
@@ -566,6 +587,58 @@ impl Request {
                     client_payload,
                 })
             }
+            Self::RefCreate {
+                repository,
+                reference,
+                sha,
+            } => {
+                validate_full_ref(&reference)?;
+                validate_git_object_sha(&sha)?;
+                Ok(Operation::RefCreate {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    reference,
+                    sha,
+                })
+            }
+            Self::RefDelete {
+                repository,
+                reference,
+            } => {
+                validate_full_ref(&reference)?;
+                Ok(Operation::RefDelete {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    reference,
+                })
+            }
+            Self::TagCreate {
+                repository,
+                tag,
+                target,
+                message,
+            } => {
+                validate_tag(&tag)?;
+                validate_git_object_sha(&target)?;
+                if let Some(message) = &message {
+                    validate_commit_message(message)?;
+                }
+                Ok(Operation::TagCreate {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    tag,
+                    target,
+                    message,
+                })
+            }
+            Self::TagDelete { repository, tag } => {
+                validate_tag(&tag)?;
+                Ok(Operation::TagDelete {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    tag,
+                })
+            }
             Self::WorkflowDispatch {
                 repository,
                 workflow,
@@ -786,6 +859,31 @@ pub enum Operation {
         event_type: String,
         client_payload: BTreeMap<String, serde_json::Value>,
     },
+    RefCreate {
+        owner: String,
+        repository: String,
+        #[serde(rename = "ref")]
+        reference: String,
+        sha: String,
+    },
+    RefDelete {
+        owner: String,
+        repository: String,
+        #[serde(rename = "ref")]
+        reference: String,
+    },
+    TagCreate {
+        owner: String,
+        repository: String,
+        tag: String,
+        target: String,
+        message: Option<String>,
+    },
+    TagDelete {
+        owner: String,
+        repository: String,
+        tag: String,
+    },
     WorkflowDispatch {
         owner: String,
         repository: String,
@@ -845,6 +943,10 @@ impl Operation {
             Self::PullRequestUpdateBranch { .. } => "pull_request_update_branch",
             Self::CommitCreate { .. } => "commit_create",
             Self::RepositoryDispatch { .. } => "repository_dispatch",
+            Self::RefCreate { .. } => "ref_create",
+            Self::RefDelete { .. } => "ref_delete",
+            Self::TagCreate { .. } => "tag_create",
+            Self::TagDelete { .. } => "tag_delete",
             Self::WorkflowDispatch { .. } => "workflow_dispatch",
             Self::WorkflowCancel { .. } => "workflow_cancel",
             Self::WorkflowRerun { .. } => "workflow_rerun",
@@ -1025,6 +1127,30 @@ fn validate_branch(branch: &str) -> Result<()> {
         || invalid_component
     {
         bail!("branch or tag must be a valid Git ref name between 1 and 255 bytes");
+    }
+    Ok(())
+}
+
+fn validate_full_ref(reference: &str) -> Result<()> {
+    let suffix = reference
+        .strip_prefix("refs/")
+        .filter(|suffix| suffix.contains('/'))
+        .ok_or_else(|| {
+            anyhow::anyhow!("ref must start with refs/ and contain at least two slashes")
+        })?;
+    validate_branch(suffix)
+}
+
+fn validate_tag(tag: &str) -> Result<()> {
+    if tag.starts_with("refs/") {
+        bail!("tag must not include the refs/tags/ prefix");
+    }
+    validate_branch(tag)
+}
+
+fn validate_git_object_sha(sha: &str) -> Result<()> {
+    if sha.len() != 40 || !sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        bail!("Git object SHA must contain exactly 40 hexadecimal characters");
     }
     Ok(())
 }
@@ -1322,6 +1448,10 @@ mod tests {
             r#"{"operation":"pull_request_update_branch","repository":"owner/repo","number":1}"#,
             r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"data: update roster","files":[{"path":"data/members.json","content":"[]"},{"path":"data/old.json","delete":true}]}"#,
             r#"{"operation":"repository_dispatch","repository":"owner/repo","event_type":"apt-release","client_payload":{"version":"1.2.3"}}"#,
+            r#"{"operation":"ref_create","repository":"owner/repo","ref":"refs/heads/release","sha":"0123456789abcdef0123456789abcdef01234567"}"#,
+            r#"{"operation":"ref_delete","repository":"owner/repo","ref":"refs/heads/release"}"#,
+            r#"{"operation":"tag_create","repository":"owner/repo","tag":"v1.2.3","target":"0123456789abcdef0123456789abcdef01234567","message":"release 1.2.3"}"#,
+            r#"{"operation":"tag_delete","repository":"owner/repo","tag":"v1.2.3"}"#,
             r#"{"operation":"workflow_dispatch","repository":"owner/repo","workflow":"release.yml","ref":"main","inputs":{"release":"true"}}"#,
             r#"{"operation":"workflow_cancel","repository":"owner/repo","run_id":1}"#,
             r#"{"operation":"workflow_rerun","repository":"owner/repo","run_id":1,"failed_only":true}"#,
@@ -1400,6 +1530,87 @@ mod tests {
                 "client_payload": {"retry": false, "version": "1.2.3"}
             })
         );
+    }
+
+    #[test]
+    fn serializes_ref_and_tag_contracts() {
+        let documents = [
+            (
+                r#"{"operation":"ref_create","repository":"owner/repo","ref":"refs/heads/release","sha":"0123456789abcdef0123456789abcdef01234567"}"#,
+                serde_json::json!({
+                    "operation": "ref_create",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "ref": "refs/heads/release",
+                    "sha": "0123456789abcdef0123456789abcdef01234567"
+                }),
+            ),
+            (
+                r#"{"operation":"ref_delete","repository":"owner/repo","ref":"refs/heads/release"}"#,
+                serde_json::json!({
+                    "operation": "ref_delete",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "ref": "refs/heads/release"
+                }),
+            ),
+            (
+                r#"{"operation":"tag_create","repository":"owner/repo","tag":"v1.2.3","target":"0123456789abcdef0123456789abcdef01234567","message":"release 1.2.3"}"#,
+                serde_json::json!({
+                    "operation": "tag_create",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "tag": "v1.2.3",
+                    "target": "0123456789abcdef0123456789abcdef01234567",
+                    "message": "release 1.2.3"
+                }),
+            ),
+            (
+                r#"{"operation":"tag_create","repository":"owner/repo","tag":"v1.2.3","target":"0123456789abcdef0123456789abcdef01234567"}"#,
+                serde_json::json!({
+                    "operation": "tag_create",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "tag": "v1.2.3",
+                    "target": "0123456789abcdef0123456789abcdef01234567",
+                    "message": null
+                }),
+            ),
+            (
+                r#"{"operation":"tag_delete","repository":"owner/repo","tag":"v1.2.3"}"#,
+                serde_json::json!({
+                    "operation": "tag_delete",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "tag": "v1.2.3"
+                }),
+            ),
+        ];
+
+        for (document, expected) in documents {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            let operation = request.prepare(true).expect("request should prepare");
+            assert_eq!(
+                serde_json::to_value(operation).expect("operation should serialize"),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_refs_tags_and_shas() {
+        let documents = [
+            r#"{"operation":"ref_create","repository":"owner/repo","ref":"main","sha":"0123456789abcdef0123456789abcdef01234567"}"#,
+            r#"{"operation":"ref_create","repository":"owner/repo","ref":"refs/heads/../main","sha":"0123456789abcdef0123456789abcdef01234567"}"#,
+            r#"{"operation":"ref_create","repository":"owner/repo","ref":"refs/heads/release","sha":"abc"}"#,
+            r#"{"operation":"tag_create","repository":"owner/repo","tag":"refs/tags/v1","target":"0123456789abcdef0123456789abcdef01234567"}"#,
+            r#"{"operation":"tag_create","repository":"owner/repo","tag":"v1","target":"not-a-sha"}"#,
+        ];
+
+        for document in documents {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            assert!(request.prepare(true).is_err());
+        }
     }
 
     #[test]

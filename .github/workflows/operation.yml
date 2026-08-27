@@ -205,6 +205,48 @@ jobs:
               gh api --method POST "repos/${slug}/dispatches" --input request.json >/dev/null
               result="https://github.com/${slug}/actions"
               ;;
+            ref_create)
+              reference=$(jq -er '.ref | select(startswith("refs/") and length <= 260)' payload.json)
+              sha=$(jq -er '.sha | select(test("^[0-9A-Fa-f]{40}$"))' payload.json)
+              jq -n --arg ref "${reference}" --arg sha "${sha}" '{ref: $ref, sha: $sha}' >request.json
+              gh api --method POST "repos/${slug}/git/refs" --input request.json >/dev/null
+              short_ref=${reference#refs/}
+              encoded_ref=$(jq -rn --arg value "${short_ref}" '$value | @uri')
+              result="https://github.com/${slug}/tree/${encoded_ref}"
+              ;;
+            ref_delete)
+              reference=$(jq -er '.ref | select(startswith("refs/") and length <= 260)' payload.json)
+              short_ref=${reference#refs/}
+              encoded_ref=$(jq -rn --arg value "${short_ref}" '$value | @uri')
+              gh api --method DELETE "repos/${slug}/git/refs/${encoded_ref}" >/dev/null
+              result="https://github.com/${slug}"
+              ;;
+            tag_create)
+              tag=$(jq -er '.tag | select(length > 0 and length <= 255)' payload.json)
+              target=$(jq -er '.target | select(test("^[0-9A-Fa-f]{40}$"))' payload.json)
+              message=$(jq -r '.message // empty' payload.json)
+              if [ -n "${message}" ]; then
+                tagger_login='pukbot[bot]'
+                tagger_id=$(gh api "users/pukbot%5Bbot%5D" --jq .id)
+                tagger_email="${tagger_id}+${tagger_login}@users.noreply.github.com"
+                jq -n --arg tag "${tag}" --arg message "${message}" --arg object "${target}" \
+                  --arg name "${tagger_login}" --arg email "${tagger_email}" \
+                  '{tag: $tag, message: $message, object: $object, type: "commit", tagger: {name: $name, email: $email}}' \
+                  >request.json
+                target=$(gh api --method POST "repos/${slug}/git/tags" --input request.json --jq .sha)
+              fi
+              reference="refs/tags/${tag}"
+              jq -n --arg ref "${reference}" --arg sha "${target}" '{ref: $ref, sha: $sha}' >request.json
+              gh api --method POST "repos/${slug}/git/refs" --input request.json >/dev/null
+              encoded_tag=$(jq -rn --arg value "${tag}" '$value | @uri')
+              result="https://github.com/${slug}/tree/${encoded_tag}"
+              ;;
+            tag_delete)
+              tag=$(jq -er '.tag | select(length > 0 and length <= 255)' payload.json)
+              encoded_tag=$(jq -rn --arg value "${tag}" '$value | @uri')
+              gh api --method DELETE "repos/${slug}/git/refs/tags/${encoded_tag}" >/dev/null
+              result="https://github.com/${slug}/tags"
+              ;;
             workflow_dispatch)
               workflow=$(jq -er \
                 '.workflow | select(test("^[A-Za-z0-9_.-]{1,255}$") and . != "." and . != "..")' \

@@ -79,6 +79,14 @@ enum Commands {
         #[command(subcommand)]
         command: RepositoryCommand,
     },
+    Ref {
+        #[command(subcommand)]
+        command: GitRefCommand,
+    },
+    Tag {
+        #[command(subcommand)]
+        command: TagCommand,
+    },
     Workflow {
         #[command(subcommand)]
         command: WorkflowCommand,
@@ -160,6 +168,18 @@ enum CommitCommand {
 #[derive(Debug, Subcommand)]
 enum RepositoryCommand {
     Dispatch(RepositoryDispatchArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum GitRefCommand {
+    Create(GitRefCreateArgs),
+    Delete(GitRefDeleteArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum TagCommand {
+    Create(TagCreateArgs),
+    Delete(TagDeleteArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -287,6 +307,58 @@ struct RepositoryDispatchArgs {
     client_payload: Option<String>,
     #[arg(long, value_name = "FILE", conflicts_with = "client_payload")]
     client_payload_file: Option<PathBuf>,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct GitRefCreateArgs {
+    #[arg(value_name = "REF")]
+    reference: String,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long, value_name = "SHA")]
+    sha: String,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct GitRefDeleteArgs {
+    #[arg(value_name = "REF")]
+    reference: String,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    yes: bool,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct TagCreateArgs {
+    #[arg(value_name = "TAG")]
+    tag: String,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long, value_name = "SHA")]
+    target: String,
+    #[arg(long, conflicts_with = "message_file")]
+    message: Option<String>,
+    #[arg(long, value_name = "FILE", conflicts_with = "message")]
+    message_file: Option<PathBuf>,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct TagDeleteArgs {
+    #[arg(value_name = "TAG")]
+    tag: String,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    yes: bool,
     #[arg(long)]
     dry_run: bool,
 }
@@ -523,6 +595,8 @@ fn run() -> Result<()> {
         Commands::Pr { command } => run_pull_request(command, cli.json),
         Commands::Commit { command } => run_commit(command, cli.json),
         Commands::Repository { command } => run_repository(command, cli.json),
+        Commands::Ref { command } => run_git_ref(command, cli.json),
+        Commands::Tag { command } => run_tag(command, cli.json),
         Commands::Workflow { command } => run_workflow(command, cli.json),
         Commands::Completions(args) => run_completions(args, cli.json),
         Commands::Man(args) => run_manual(args, cli.json),
@@ -859,6 +933,64 @@ fn run_repository(command: RepositoryCommand, json: bool) -> Result<()> {
     }
 }
 
+fn run_git_ref(command: GitRefCommand, json: bool) -> Result<()> {
+    match command {
+        GitRefCommand::Create(args) => execute(
+            Request::RefCreate {
+                repository: args.repo,
+                reference: args.reference,
+                sha: args.sha,
+            },
+            args.dry_run,
+            json,
+        ),
+        GitRefCommand::Delete(args) => {
+            if !args.yes && !args.dry_run {
+                bail!("ref deletion requires --yes");
+            }
+            execute(
+                Request::RefDelete {
+                    repository: args.repo,
+                    reference: args.reference,
+                },
+                args.dry_run,
+                json,
+            )
+        }
+    }
+}
+
+fn run_tag(command: TagCommand, json: bool) -> Result<()> {
+    match command {
+        TagCommand::Create(args) => execute(
+            Request::TagCreate {
+                repository: args.repo,
+                tag: args.tag,
+                target: args.target,
+                message: read_optional_message(
+                    args.message.as_deref(),
+                    args.message_file.as_deref(),
+                )?,
+            },
+            args.dry_run,
+            json,
+        ),
+        TagCommand::Delete(args) => {
+            if !args.yes && !args.dry_run {
+                bail!("tag deletion requires --yes");
+            }
+            execute(
+                Request::TagDelete {
+                    repository: args.repo,
+                    tag: args.tag,
+                },
+                args.dry_run,
+                json,
+            )
+        }
+    }
+}
+
 fn run_workflow(command: WorkflowCommand, json: bool) -> Result<()> {
     match command {
         WorkflowCommand::Dispatch(args) => {
@@ -1082,6 +1214,21 @@ fn read_message(args: &MessageArgs) -> Result<String> {
     read_stdin_body()
 }
 
+fn read_optional_message(inline: Option<&str>, path: Option<&Path>) -> Result<Option<String>> {
+    if let Some(message) = inline {
+        return Ok(Some(message.to_owned()));
+    }
+    if let Some(path) = path {
+        if path == Path::new("-") {
+            return read_stdin_body().map(Some);
+        }
+        return fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))
+            .map(Some);
+    }
+    Ok(None)
+}
+
 fn read_stdin_body() -> Result<String> {
     let mut body = String::new();
     io::stdin()
@@ -1178,6 +1325,10 @@ fn capabilities() -> Capabilities {
             "pr.update-branch",
             "commit.create",
             "repository.dispatch",
+            "ref.create",
+            "ref.delete",
+            "tag.create",
+            "tag.delete",
             "workflow.dispatch",
             "workflow.cancel",
             "workflow.rerun",
@@ -1222,6 +1373,10 @@ fn capabilities() -> Capabilities {
                 "issue.react",
                 "commit.create",
                 "repository.dispatch",
+                "ref.create",
+                "ref.delete",
+                "tag.create",
+                "tag.delete",
                 "workflow.dispatch",
                 "workflow.cancel",
                 "workflow.rerun",

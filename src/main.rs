@@ -6,11 +6,13 @@ mod media;
 mod model;
 mod update;
 mod workflow;
+mod workflow_run;
 
 use std::collections::BTreeMap;
 use std::io::{self, IsTerminal, Read, Write};
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use std::{fs, process};
 
 use anyhow::{Context, Result, bail};
@@ -167,6 +169,9 @@ enum WorkflowCommand {
     Rerun(WorkflowRerunArgs),
     Enable(WorkflowTargetArgs),
     Disable(WorkflowTargetArgs),
+    Status(WorkflowInspectArgs),
+    Watch(WorkflowWatchArgs),
+    Logs(WorkflowLogsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -266,6 +271,10 @@ struct WorkflowDispatchArgs {
     inputs: Vec<String>,
     #[arg(long)]
     dry_run: bool,
+    #[arg(long)]
+    watch: bool,
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u64).range(1..=60))]
+    interval: u64,
 }
 
 #[derive(Debug, Args)]
@@ -308,6 +317,30 @@ struct WorkflowTargetArgs {
     repo: Repository,
     #[arg(long)]
     dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct WorkflowInspectArgs {
+    #[arg(value_name = "RUN_ID")]
+    run_id: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+}
+
+#[derive(Debug, Args)]
+struct WorkflowWatchArgs {
+    #[command(flatten)]
+    run: WorkflowInspectArgs,
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u64).range(1..=60))]
+    interval: u64,
+}
+
+#[derive(Debug, Args)]
+struct WorkflowLogsArgs {
+    #[command(flatten)]
+    run: WorkflowInspectArgs,
+    #[arg(long)]
+    failed: bool,
 }
 
 #[derive(Debug, Args)]
@@ -437,6 +470,13 @@ struct MutationResult {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct WorkflowDispatchWatchResult {
+    mutation: MutationResult,
+    run: workflow_run::WorkflowRun,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Capabilities {
     protocol_version: u8,
     commands: Vec<&'static str>,
@@ -451,6 +491,7 @@ struct Capabilities {
 struct Attribution {
     user: Vec<&'static str>,
     app: Vec<&'static str>,
+    read_only: Vec<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -820,16 +861,28 @@ fn run_repository(command: RepositoryCommand, json: bool) -> Result<()> {
 
 fn run_workflow(command: WorkflowCommand, json: bool) -> Result<()> {
     match command {
-        WorkflowCommand::Dispatch(args) => execute(
-            Request::WorkflowDispatch {
+        WorkflowCommand::Dispatch(args) => {
+            let repository = args.repo.clone();
+            let request = Request::WorkflowDispatch {
                 repository: args.repo,
                 workflow: args.workflow,
                 reference: args.reference,
                 inputs: parse_workflow_inputs(&args.inputs)?,
-            },
-            args.dry_run,
-            json,
-        ),
+            };
+            if args.watch {
+                if args.dry_run {
+                    bail!("--watch cannot be combined with --dry-run");
+                }
+                execute_workflow_dispatch(
+                    request,
+                    &repository,
+                    Duration::from_secs(args.interval),
+                    json,
+                )
+            } else {
+                execute(request, args.dry_run, json)
+            }
+        }
         WorkflowCommand::Cancel(args) => execute(
             Request::WorkflowCancel {
                 repository: args.repo,
@@ -863,7 +916,56 @@ fn run_workflow(command: WorkflowCommand, json: bool) -> Result<()> {
             args.dry_run,
             json,
         ),
+        WorkflowCommand::Status(args) => {
+            let run = workflow_run::inspect(&args.repo, args.run_id)?;
+            workflow_run::emit_status(&run, json)
+        }
+        WorkflowCommand::Watch(args) => {
+            let output = if json {
+                workflow_run::WatchOutput::Json
+            } else {
+                workflow_run::WatchOutput::Text
+            };
+            workflow_run::watch(
+                &args.run.repo,
+                args.run.run_id,
+                Duration::from_secs(args.interval),
+                output,
+            )?;
+            Ok(())
+        }
+        WorkflowCommand::Logs(args) => {
+            workflow_run::emit_logs(&args.run.repo, args.run.run_id, args.failed, json)
+        }
     }
+}
+
+fn execute_workflow_dispatch(
+    request: Request,
+    repository: &Repository,
+    interval: Duration,
+    json: bool,
+) -> Result<()> {
+    let operation = request.prepare(false)?;
+    let mutation = perform_operation(&operation, !json)?;
+    let resource_url = mutation
+        .resource_url
+        .as_deref()
+        .context("workflow dispatch did not return a run URL")?;
+    let run_id = workflow_run::run_id_from_url(repository, resource_url)?;
+    if !json {
+        emit_text_result(&mutation)?;
+    }
+    let output = if json {
+        workflow_run::WatchOutput::Quiet
+    } else {
+        workflow_run::WatchOutput::Text
+    };
+    let run = workflow_run::watch(repository, run_id, interval, output)?;
+    if json {
+        emit_json(&WorkflowDispatchWatchResult { mutation, run })?;
+    }
+    Ok(())
 }
 
 fn read_client_payload(
@@ -898,26 +1000,30 @@ fn execute(request: Request, dry_run: bool, json: bool) -> Result<()> {
     if dry_run {
         return emit_json(&operation);
     }
-    let output = if local::runs_locally(&operation) {
-        MutationResult {
-            operation: operation.name().to_owned(),
-            authored_by: "user",
-            workflow_url: None,
-            resource_url: Some(local::execute(&operation)?),
-        }
-    } else {
-        let result = workflow::dispatch(&operation, !json)?;
-        MutationResult {
-            operation: operation.name().to_owned(),
-            authored_by: "pukbot",
-            workflow_url: Some(result.workflow_url),
-            resource_url: result.resource_url,
-        }
-    };
+    let output = perform_operation(&operation, !json)?;
     if json {
         emit_json(&output)
     } else {
         emit_text_result(&output)
+    }
+}
+
+fn perform_operation(operation: &model::Operation, stream: bool) -> Result<MutationResult> {
+    if local::runs_locally(operation) {
+        Ok(MutationResult {
+            operation: operation.name().to_owned(),
+            authored_by: "user",
+            workflow_url: None,
+            resource_url: Some(local::execute(operation)?),
+        })
+    } else {
+        let result = workflow::dispatch(operation, stream)?;
+        Ok(MutationResult {
+            operation: operation.name().to_owned(),
+            authored_by: "pukbot",
+            workflow_url: Some(result.workflow_url),
+            resource_url: result.resource_url,
+        })
     }
 }
 
@@ -1033,6 +1139,11 @@ fn emit_capabilities(json: bool) -> Result<()> {
             "authored by pukbot: {}",
             capabilities.attribution.app.join(", ")
         )?;
+        writeln!(
+            stdout,
+            "read only: {}",
+            capabilities.attribution.read_only.join(", ")
+        )?;
         Ok(())
     }
 }
@@ -1072,6 +1183,9 @@ fn capabilities() -> Capabilities {
             "workflow.rerun",
             "workflow.enable",
             "workflow.disable",
+            "workflow.status",
+            "workflow.watch",
+            "workflow.logs",
             "completions",
             "man",
             "update",
@@ -1114,6 +1228,7 @@ fn capabilities() -> Capabilities {
                 "workflow.enable",
                 "workflow.disable",
             ],
+            read_only: vec!["workflow.status", "workflow.watch", "workflow.logs"],
         },
     }
 }

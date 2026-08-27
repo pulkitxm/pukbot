@@ -1,0 +1,53 @@
+name: Operation fixture
+run-name: Operation fixture ${{ inputs.message || github.event.client_payload.message || github.event.action }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        required: false
+        type: string
+      delay:
+        required: false
+        default: "0"
+        type: choice
+        options:
+          - "0"
+          - "60"
+      fail:
+        required: false
+        default: false
+        type: boolean
+  repository_dispatch:
+    types: [pukbot-test]
+
+permissions:
+  contents: read
+
+jobs:
+  fixture:
+    name: Operation fixture
+    runs-on: ubuntu-latest
+    env:
+      DELAY: ${{ inputs.delay || github.event.client_payload.delay || '0' }}
+      FAIL: ${{ inputs.fail || github.event.client_payload.fail || 'false' }}
+      MESSAGE: ${{ inputs.message || github.event.client_payload.message || '' }}
+    steps:
+      - name: Report event
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          printf 'event=%s\nactor=%s\nmessage=%s\n' "${EVENT}" "${GITHUB_ACTOR}" "${MESSAGE}"
+      - name: Wait
+        run: |
+          case "${DELAY}" in
+            0 | 60) sleep "${DELAY}" ;;
+            *) exit 2 ;;
+          esac
+      - name: Finish
+        run: |
+          if [ "${FAIL}" = true ]; then
+            printf 'requested failure\n' >&2
+            exit 1
+          fi
+          printf 'fixture completed\n'

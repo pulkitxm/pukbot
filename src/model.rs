@@ -1008,8 +1008,23 @@ fn unclosed_code_fence(body: &str) -> Option<String> {
 }
 
 fn validate_branch(branch: &str) -> Result<()> {
-    if branch.trim().is_empty() || branch.len() > 255 || branch.contains(['\n', '\r']) {
-        bail!("branch must be between 1 and 255 bytes without newlines");
+    let invalid_component = branch.split('/').any(|component| {
+        component.is_empty()
+            || component.starts_with('.')
+            || component.as_bytes().ends_with(b".lock")
+    });
+    if branch.trim().is_empty()
+        || branch.len() > 255
+        || branch == "@"
+        || branch.ends_with('.')
+        || branch.contains("..")
+        || branch.contains("@{")
+        || branch
+            .chars()
+            .any(|character| character.is_control() || " ~^:?*[\\".contains(character))
+        || invalid_component
+    {
+        bail!("branch or tag must be a valid Git ref name between 1 and 255 bytes");
     }
     Ok(())
 }
@@ -1446,6 +1461,21 @@ mod tests {
         )
         .expect("request should parse");
         assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn rejects_unsafe_workflow_ref() {
+        for reference in ["../main", "refs//heads/main", "release.lock", "feature@{1}"] {
+            let document = serde_json::json!({
+                "operation": "workflow_dispatch",
+                "repository": "owner/repo",
+                "workflow": "release.yml",
+                "ref": reference
+            });
+            let request =
+                serde_json::from_value::<Request>(document).expect("request should parse");
+            assert!(request.prepare(true).is_err());
+        }
     }
 
     #[test]

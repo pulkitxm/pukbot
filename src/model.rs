@@ -806,7 +806,7 @@ fn validate_body(body: &str) -> Result<()> {
     if body.len() > MAX_BODY_BYTES {
         bail!("body exceeds {MAX_BODY_BYTES} bytes");
     }
-    Ok(())
+    validate_markdown(body)
 }
 
 fn validate_optional_body(body: Option<&str>) -> Result<()> {
@@ -814,8 +814,53 @@ fn validate_optional_body(body: Option<&str>) -> Result<()> {
         if body.len() > MAX_BODY_BYTES {
             bail!("body exceeds {MAX_BODY_BYTES} bytes");
         }
+        validate_markdown(body)?;
     }
     Ok(())
+}
+
+fn validate_markdown(body: &str) -> Result<()> {
+    if let Some(fence) = unclosed_code_fence(body) {
+        bail!(
+            "body has an unclosed {fence} code fence; close it so the rest of the body renders as Markdown"
+        );
+    }
+    Ok(())
+}
+
+fn unclosed_code_fence(body: &str) -> Option<String> {
+    let mut open: Option<(char, usize)> = None;
+    for line in body.lines() {
+        let trimmed = line.trim_start();
+        if line.len() - trimmed.len() >= 4 {
+            continue;
+        }
+        let Some(marker) = trimmed.chars().next() else {
+            continue;
+        };
+        if !matches!(marker, '`' | '~') {
+            continue;
+        }
+        let width = trimmed.chars().take_while(|value| *value == marker).count();
+        if width < 3 {
+            continue;
+        }
+        let rest = &trimmed[width..];
+        match open {
+            None => {
+                if marker == '`' && rest.contains('`') {
+                    continue;
+                }
+                open = Some((marker, width));
+            }
+            Some((open_marker, open_width)) => {
+                if marker == open_marker && width >= open_width && rest.trim().is_empty() {
+                    open = None;
+                }
+            }
+        }
+    }
+    open.map(|(marker, width)| marker.to_string().repeat(width))
 }
 
 fn validate_branch(branch: &str) -> Result<()> {
@@ -933,7 +978,7 @@ fn is_repository_character(character: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{Operation, Reaction, Repository, Request};
+    use super::{Operation, Reaction, Repository, Request, unclosed_code_fence};
 
     #[test]
     fn parses_repository() {
@@ -945,6 +990,63 @@ mod tests {
                 name: "pukbot".to_owned(),
             })
         );
+    }
+
+    #[test]
+    fn accepts_closed_code_fences() {
+        assert_eq!(
+            unclosed_code_fence("text\n\n```rust\nfn main() {}\n```\n"),
+            None
+        );
+        assert_eq!(unclosed_code_fence("````\n```\n````"), None);
+        assert_eq!(unclosed_code_fence("~~~text\noutput\n~~~"), None);
+        assert_eq!(unclosed_code_fence("plain text with ``` inline"), None);
+        assert_eq!(unclosed_code_fence("~~struck~~"), None);
+        assert_eq!(unclosed_code_fence("```text\n    ```\n```"), None);
+        assert_eq!(
+            unclosed_code_fence("- item\n\n  ```text\n  output\n  ```\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn detects_unclosed_code_fences() {
+        assert_eq!(
+            unclosed_code_fence("```text\noutput\n"),
+            Some("```".to_owned())
+        );
+        assert_eq!(
+            unclosed_code_fence("````\n```\nnested\n```\n"),
+            Some("````".to_owned())
+        );
+        assert_eq!(unclosed_code_fence("~~~\noutput"), Some("~~~".to_owned()));
+    }
+
+    #[test]
+    fn rejects_a_body_with_an_unclosed_fence() {
+        let request = serde_json::from_str::<Request>(
+            r#"{"operation":"comment_create","repository":"owner/repo","number":1,"body":"```text\noutput\n"}"#,
+        )
+        .expect("request should parse");
+        assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn keeps_rich_markdown_verbatim() {
+        let body = "## Result\n\n| check | state |\n| --- | --- |\n| fmt | pass |\n\n```bash\npukbot capabilities --json\n```\n\n> [!NOTE]\n> done\n";
+        let document = serde_json::json!({
+            "operation": "comment_create",
+            "repository": "owner/repo",
+            "number": 1,
+            "body": body,
+        })
+        .to_string();
+        let request = serde_json::from_str::<Request>(&document).expect("request should parse");
+        let operation = request.prepare(true).expect("request should prepare");
+        match operation {
+            Operation::CreateComment { body: prepared, .. } => assert_eq!(prepared, body),
+            other => panic!("unexpected operation: {}", other.name()),
+        }
     }
 
     #[test]

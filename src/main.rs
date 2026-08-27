@@ -15,11 +15,37 @@ use std::{fs, process};
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use clap_complete::Shell;
-use model::{CommentDocument, Reaction, Repository, Request, ReviewEvent};
+use model::{CommentDocument, MAX_BODY_BYTES, Reaction, Repository, Request, ReviewEvent};
 use serde::Serialize;
 
+const ABOUT: &str = "Pukbot performs typed GitHub operations through the Pukbot GitHub App.
+
+Every body is GitHub-flavored Markdown and is posted verbatim: headings, fenced
+code blocks with syntax highlighting, tables, task lists, blockquote alerts,
+collapsed details sections, footnotes, mentions, references, emoji, math, and
+mermaid diagrams all render. Run `pukbot capabilities --json` for the machine
+readable inventory.";
+
+const BODY_LONG_HELP: &str = "GitHub-flavored Markdown body, posted verbatim.
+
+Every syntax GitHub renders is supported with no flag and no escaping: headings,
+bold, italic, strikethrough, inline code, fenced code blocks with a language,
+ordered, unordered, and task lists, tables, blockquotes, [!NOTE] and [!WARNING]
+alerts, collapsed <details> sections, footnotes, links, images, @mentions, #123
+references, emoji, math, and mermaid diagrams.
+
+Put command output, logs, diffs, and JSON inside a fenced code block with a
+language. Every fence must be closed. Prefer --body-file for anything longer
+than one line, because a shell mangles backticks and newlines.";
+
+const BODY_FILE_LONG_HELP: &str =
+    "Read the GitHub-flavored Markdown body from a file, or from standard input when the path is -.
+
+This is the reliable way to pass multiline Markdown, because the file content is
+sent verbatim without shell quoting.";
+
 #[derive(Debug, Parser)]
-#[command(name = "pukbot", version, about)]
+#[command(name = "pukbot", version, about, long_about = ABOUT)]
 pub(crate) struct Cli {
     #[arg(long, global = true)]
     json: bool,
@@ -169,14 +195,16 @@ struct BodyArgs {
     #[arg(
         long,
         conflicts_with = "body_file",
-        help = "GitHub-flavored Markdown body, posted verbatim (code fences, tables, task lists, and every other GitHub syntax render as written)"
+        help = "GitHub-flavored Markdown body, posted verbatim (code fences, tables, task lists, and every other GitHub syntax render as written)",
+        long_help = BODY_LONG_HELP
     )]
     body: Option<String>,
     #[arg(
         long,
         value_name = "FILE",
         conflicts_with = "body",
-        help = "Read the GitHub-flavored Markdown body from FILE, or from stdin with -; preferred for multiline bodies"
+        help = "Read the GitHub-flavored Markdown body from FILE, or from stdin with -; preferred for multiline bodies",
+        long_help = BODY_FILE_LONG_HELP
     )]
     body_file: Option<PathBuf>,
 }
@@ -334,6 +362,7 @@ struct Capabilities {
     protocol_version: u8,
     commands: Vec<&'static str>,
     media: Vec<&'static str>,
+    markdown: Markdown,
     output: Vec<&'static str>,
     attribution: Attribution,
 }
@@ -343,6 +372,16 @@ struct Capabilities {
 struct Attribution {
     user: Vec<&'static str>,
     app: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Markdown {
+    flavor: &'static str,
+    verbatim: bool,
+    max_body_bytes: usize,
+    footer_operations: Vec<&'static str>,
+    features: Vec<&'static str>,
 }
 
 fn main() {
@@ -825,6 +864,7 @@ fn emit_capabilities(json: bool) -> Result<()> {
             "update",
         ],
         media: media::supported_extensions(),
+        markdown: markdown_capabilities(),
         output: vec!["text", "json"],
         attribution: Attribution {
             user: vec![
@@ -864,6 +904,16 @@ fn emit_capabilities(json: bool) -> Result<()> {
         writeln!(stdout, "protocol: {}", capabilities.protocol_version)?;
         writeln!(stdout, "commands: {}", capabilities.commands.join(", "))?;
         writeln!(stdout, "media: {}", capabilities.media.join(", "))?;
+        writeln!(
+            stdout,
+            "markdown: {} verbatim, up to {} bytes",
+            capabilities.markdown.flavor, capabilities.markdown.max_body_bytes
+        )?;
+        writeln!(
+            stdout,
+            "markdown features: {}",
+            capabilities.markdown.features.join(", ")
+        )?;
         writeln!(stdout, "output: {}", capabilities.output.join(", "))?;
         writeln!(
             stdout,
@@ -876,5 +926,46 @@ fn emit_capabilities(json: bool) -> Result<()> {
             capabilities.attribution.app.join(", ")
         )?;
         Ok(())
+    }
+}
+
+fn markdown_capabilities() -> Markdown {
+    Markdown {
+        flavor: "github",
+        verbatim: true,
+        max_body_bytes: MAX_BODY_BYTES,
+        footer_operations: vec!["comment_create", "comment_edit"],
+        features: vec![
+            "headings",
+            "emphasis",
+            "strikethrough",
+            "inline-code",
+            "fenced-code",
+            "syntax-highlighting",
+            "line-breaks",
+            "lists",
+            "task-lists",
+            "tables",
+            "blockquotes",
+            "alerts",
+            "details",
+            "footnotes",
+            "links",
+            "autolinks",
+            "images",
+            "media-placeholders",
+            "mentions",
+            "references",
+            "permalinks",
+            "emoji",
+            "math",
+            "mermaid",
+            "geojson",
+            "topojson",
+            "stl",
+            "html-subset",
+            "html-comments",
+            "escapes",
+        ],
     }
 }

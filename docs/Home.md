@@ -7,6 +7,7 @@ authenticated user instead, so they land in that user's contribution history.
 - [Installation](Installation.md)
 - [Operations](Operations.md)
 - [Agent usage](Agent.md)
+- [Markdown bodies](Markdown.md)
 - [Completions and manuals](Completions.md)
 - [Self-update](Update.md)
 - [Security](Security.md)

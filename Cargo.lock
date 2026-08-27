@@ -353,7 +353,7 @@ dependencies = [
 
 [[package]]
 name = "pukbot"
-version = "0.3.0"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "clap",

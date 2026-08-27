@@ -17,8 +17,9 @@ Inspect `pukbot capabilities --json` before relying on an operation. Use
 request, and review bodies are GitHub-flavored Markdown posted verbatim: fence
 code, logs, and command output in code blocks with a language identifier, and
 use headings, tables, task lists, and `<details>` sections instead of plain
-text. Pass multiline bodies with `--body-file` or stdin. Local media uploads
-are public and must never contain credentials or private data.
+text. Close every code fence. Pass multiline bodies with `--body-file` or
+stdin. Local media uploads are public and must never contain credentials or
+private data.
 ```
 
 The stable agent sequence is:
@@ -37,6 +38,23 @@ Unknown JSON fields fail validation. Failed workflows return a nonzero exit
 code and print failed job logs. Text progress is suppressed when `--json` is
 active.
 
-See [Operations](Operations.md) for every request shape, the
-[Markdown bodies](Operations.md#markdown-bodies) contract for the full body
-syntax, and [Security](Security.md) for the trust boundary.
+## Bodies
+
+Comment, issue, pull request, and review bodies are GitHub-flavored Markdown.
+Pukbot sends them byte for byte, so every syntax GitHub renders in the web
+editor renders through Pukbot with no flag, no escaping, and no preprocessing.
+
+The one structural rule the CLI enforces is that fenced code blocks must be
+closed, because an open fence would swallow the rest of the body and the
+disclosure footer.
+
+In JSON requests, newlines are `\n`. Build the request with a serializer
+rather than by hand, and run `--dry-run` to print the exact body first.
+
+Machine readable discovery lives in the `markdown` object of
+`pukbot capabilities --json`.
+
+See [Markdown](Markdown.md) for the full syntax reference,
+[Operations](Operations.md) for every request shape, the
+[Markdown bodies](Operations.md#markdown-bodies) contract for the per
+operation rules, and [Security](Security.md) for the trust boundary.

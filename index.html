@@ -721,6 +721,14 @@ pukbot comment delete 456 --repo owner/repo --yes</pre>
             </article>
 
             <article class="command-card">
+              <h3>Markdown bodies</h3>
+              <p>Pass multiline Markdown from a file or stdin, and preview the exact body before it is posted.</p>
+              <pre>pukbot comment create 123 --repo owner/repo --body-file report.md
+pukbot comment create 123 --repo owner/repo &lt;report.md
+pukbot apply --input request.json --dry-run</pre>
+            </article>
+
+            <article class="command-card">
               <h3>Images, video, and files</h3>
               <p>Place multiple named media items anywhere in a JSON comment body.</p>
               <pre>pukbot apply --input request.json

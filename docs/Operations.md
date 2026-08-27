@@ -52,7 +52,10 @@ posting plain text walls:
   key labels.
 
 Close every code fence you open. Pukbot appends its attribution footer after
-comment bodies, and an unclosed fence swallows it.
+comment bodies, and an unclosed fence swallows it, so the CLI rejects a body
+with an open fence before dispatch.
+
+See [Markdown](Markdown.md) for the complete syntax reference with examples.
 
 Multiline bodies are easiest to pass with `--body-file` or stdin. When a
 body must be inline, quote it with single quotes so the shell does not
@@ -75,14 +78,14 @@ EOF
 
 In JSON requests, encode newlines as `\n`:
 
-```json
+````json
 {
   "operation": "comment_create",
   "repository": "owner/repository",
   "number": 123,
   "body": "### Result\n\n```text\nall 42 checks passed\n```"
 }
-```
+````
 
 ## Comments
 
@@ -96,6 +99,9 @@ pukbot comment react 456 --repo owner/repository --reaction eyes
 JSON operations are `comment_create`, `comment_edit`, `comment_delete`, and
 `comment_react`. Comment create and edit accept `body` plus an optional `media`
 array. Media names replace matching `{NAME}` placeholders inline.
+
+The disclosure footer is appended to comment bodies after a blank line and a
+thematic break, so it never joins the last block of the body.
 
 ```json
 {
@@ -153,6 +159,8 @@ Create accepts `title`, optional `body`, and optional `labels` and `assignees`
 arrays. Edit accepts `number` and at least one of `title` or `body`. Label and
 assignee operations accept `add` and `remove` arrays.
 
+Issue bodies receive no disclosure footer.
+
 ## Pull requests
 
 ```bash
@@ -202,6 +210,9 @@ rather than the Pukbot App, so the pull request author, the review, the merge
 event, and the squash commit on the base branch all belong to the
 authenticated user. Results report `"authoredBy": "user"` and a `null`
 `workflowUrl`. See [Attribution](#attribution).
+
+Pull request descriptions and review bodies receive no disclosure footer. Task
+lists in a description feed the pull request task counter.
 
 ## Commits
 

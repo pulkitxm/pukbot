@@ -104,6 +104,9 @@ Finished `release` profile [optimized] target(s) in 12.4s
 EOF
 ````
 
+Fenced code blocks must be closed; the CLI rejects an open fence before
+dispatch. See [Markdown](docs/Markdown.md) for the full syntax reference.
+
 Edit, delete, or react to a comment by its database ID:
 
 ```bash
@@ -182,7 +185,7 @@ Only text content is supported today; staged binary files are rejected
 before dispatch.
 
 See [Operations](docs/Operations.md) for the complete command and JSON
-contracts.
+contracts, and [Markdown](docs/Markdown.md) for the body rendering contract.
 
 Every comment ends with:
 
@@ -246,11 +249,11 @@ pukbot comment create <number> --repo <owner/repository> --body "<markdown>"
 
 Bodies are GitHub-flavored Markdown posted verbatim: fence code, logs, and
 command output in code blocks with a language identifier, and use headings,
-tables, task lists, and `<details>` sections instead of plain text. Pass
-multiline bodies with `--body-file <file>` or stdin. Use a JSON request with
-`pukbot apply --input <file>` for named inline media. Use `--json` when
-consuming output. Local media is uploaded publicly. Pukbot appends the
-required disclosure footer to comments.
+tables, task lists, and `<details>` sections instead of plain text. Close every
+code fence. Pass multiline bodies with `--body-file <file>` or stdin. Use a
+JSON request with `pukbot apply --input <file>` for named inline media. Use
+`--json` when consuming output. Local media is uploaded publicly. Pukbot
+appends the required disclosure footer to comments.
 ```
 
 ## Security

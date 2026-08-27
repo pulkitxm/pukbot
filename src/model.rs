@@ -1332,10 +1332,10 @@ fn validate_git_object_sha(sha: &str) -> Result<()> {
 }
 
 fn validate_optional_release_name(name: Option<&str>) -> Result<()> {
-    if let Some(name) = name
-        && (name.trim().is_empty() || name.len() > 255 || name.chars().any(char::is_control))
-    {
-        bail!("release name must be between 1 and 255 bytes without control characters");
+    if let Some(name) = name {
+        if name.trim().is_empty() || name.len() > 255 || name.chars().any(char::is_control) {
+            bail!("release name must be between 1 and 255 bytes without control characters");
+        }
     }
     Ok(())
 }
@@ -1353,10 +1353,10 @@ fn validate_release_asset(
     {
         bail!("release asset name must be between 1 and 255 bytes without slashes or controls");
     }
-    if let Some(label) = label
-        && (label.trim().is_empty() || label.len() > 255 || label.chars().any(char::is_control))
-    {
-        bail!("release asset label must be between 1 and 255 bytes without controls");
+    if let Some(label) = label {
+        if label.trim().is_empty() || label.len() > 255 || label.chars().any(char::is_control) {
+            bail!("release asset label must be between 1 and 255 bytes without controls");
+        }
     }
     if content_type.trim().is_empty()
         || content_type.len() > 255

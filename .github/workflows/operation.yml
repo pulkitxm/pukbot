@@ -246,6 +246,55 @@ jobs:
               gh api --method PATCH "repos/${slug}/git/refs/heads/${branch}" -f sha="${commit_sha}" -F force=false >/dev/null
               result="https://github.com/${slug}/commit/${commit_sha}"
               ;;
+            wiki_publish)
+              jq -j '.message' payload.json >message.txt
+              source_ref=$(jq -r '.source_ref // empty' payload.json)
+              source_path=$(jq -r '.source_path // empty' payload.json)
+              replace=$(jq -r '.replace' payload.json)
+              authenticated="https://x-access-token:${GH_TOKEN}@github.com"
+              git clone --quiet "${authenticated}/${slug}.wiki.git" wiki
+              if [ "${replace}" = true ]; then
+                git -C wiki rm -q -r --ignore-unmatch .
+              fi
+              if [ -n "${source_ref}" ]; then
+                git init -q source
+                git -C source remote add origin "${authenticated}/${slug}.git"
+                git -C source fetch --quiet --depth 1 origin "${source_ref}"
+                git -C source checkout --quiet --detach FETCH_HEAD
+                test -d "source/${source_path}"
+                git -C source ls-files -z -- "${source_path}" >source-files
+                file_count=$(tr -cd '\0' <source-files | wc -c)
+                test "${file_count}" -ge 1
+                test "${file_count}" -le 500
+                total_bytes=0
+                while IFS= read -r -d '' path; do
+                  relative=${path}
+                  if [ "${source_path}" != . ]; then
+                    relative=${path#"${source_path}"/}
+                    test "${relative}" != "${path}"
+                  fi
+                  test -n "${relative}"
+                  test -f "source/${path}"
+                  test ! -L "source/${path}"
+                  total_bytes=$((total_bytes + $(wc -c <"source/${path}")))
+                  test "${total_bytes}" -le 20000000
+                  mkdir -p "wiki/$(dirname "${relative}")"
+                  cp "source/${path}" "wiki/${relative}"
+                done <source-files
+              fi
+              while IFS= read -r path; do
+                test -z "${path}" || rm -f -- "wiki/${path}"
+              done < <(jq -r '.delete[]' payload.json)
+              git -C wiki add -A
+              test -n "$(git -C wiki status --porcelain)"
+              committer_login='pukbot[bot]'
+              committer_id=$(gh api "users/pukbot%5Bbot%5D" --jq .id)
+              git -C wiki config user.name "${committer_login}"
+              git -C wiki config user.email "${committer_id}+${committer_login}@users.noreply.github.com"
+              git -C wiki commit -q -F ../message.txt
+              git -C wiki push -q origin HEAD
+              result="https://github.com/${slug}/wiki"
+              ;;
             repository_dispatch)
               jq '{event_type, client_payload}' payload.json >request.json
               gh api --method POST "repos/${slug}/dispatches" --input request.json >/dev/null

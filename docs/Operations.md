@@ -386,6 +386,41 @@ Only text content is supported. Staged binary files (images, video, and
 other non-UTF-8 content) are rejected before any request is sent; commit
 those with local git for now.
 
+## Wiki publishing
+
+```bash
+pukbot wiki publish \
+  --repo owner/repository \
+  --source-ref main \
+  --source-path wiki \
+  --message "docs: publish wiki"
+
+pukbot wiki publish \
+  --repo owner/repository \
+  --source-ref wiki-output \
+  --source-path . \
+  --replace \
+  --message "docs: sync wiki"
+
+pukbot wiki publish \
+  --repo owner/repository \
+  --delete Obsolete.md \
+  --message "docs: remove obsolete wiki page"
+```
+
+Wiki publishing copies tracked files from a repository ref into the repository's
+GitHub wiki. The source ref may be a branch, tag, or full commit SHA. Source
+paths are repository-relative directories. Add `--replace` for a complete
+mirror, or repeat `--delete` to remove selected wiki paths while retaining
+everything else.
+
+The App authors and pushes the wiki commit. A publish accepts at most 500 source
+files totaling 20,000,000 bytes and at most 500 deleted paths. It rejects
+symlinks, unsafe paths, empty changes, incomplete source pairs, and replacing
+while also listing deleted paths. The JSON operation is `wiki_publish` with
+`message`, optional paired `source_ref` and `source_path`, `delete`, and
+`replace`.
+
 ## Git refs and tags
 
 ```bash

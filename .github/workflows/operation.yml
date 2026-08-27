@@ -31,7 +31,9 @@ jobs:
     environment: pukbot-production
     steps:
       - id: app-token
-        if: ${{ !startsWith(fromJSON(inputs.payload).operation, 'workflow_') }}
+        if: >-
+          ${{ !startsWith(fromJSON(inputs.payload).operation, 'workflow_') &&
+          !startsWith(fromJSON(inputs.payload).operation, 'deployment_') }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.PUKBOT_CLIENT_ID }}
@@ -41,6 +43,16 @@ jobs:
           permission-contents: write
           permission-issues: write
           permission-pull-requests: write
+      - id: deployment-token
+        if: ${{ startsWith(fromJSON(inputs.payload).operation, 'deployment_') }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.PUKBOT_CLIENT_ID }}
+          private-key: ${{ secrets.PUKBOT_PRIVATE_KEY }}
+          owner: ${{ fromJSON(inputs.payload).owner }}
+          repositories: ${{ fromJSON(inputs.payload).repository }}
+          permission-contents: read
+          permission-deployments: write
       - id: workflow-token
         if: ${{ startsWith(fromJSON(inputs.payload).operation, 'workflow_') }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
@@ -53,7 +65,7 @@ jobs:
       - name: Execute typed operation
         env:
           ACTOR: ${{ github.actor }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token || steps.workflow-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || steps.deployment-token.outputs.token || steps.workflow-token.outputs.token }}
           PAYLOAD: ${{ inputs.payload }}
           REQUESTER: ${{ inputs.requester }}
           REQUEST_ID: ${{ inputs.request_id }}
@@ -543,6 +555,52 @@ jobs:
                 --header 'X-GitHub-Api-Version: 2026-03-10' \
                 --header "Content-Type: ${content_type}" \
                 --data-binary @asset.bin "${endpoint}" | jq -er .browser_download_url)
+              ;;
+            deployment_create)
+              jq '{
+                ref,
+                task,
+                auto_merge,
+                required_contexts,
+                payload,
+                environment,
+                description,
+                transient_environment,
+                production_environment
+              } | with_entries(select(.value != null))' payload.json >request.json
+              deployment=$(gh api --method POST "repos/${slug}/deployments" \
+                --input request.json)
+              deployment_id=$(jq -er '.id | select(. >= 1)' <<<"${deployment}")
+              deployment_url=$(jq -er '.url | select(startswith("https://api.github.com/"))' \
+                <<<"${deployment}")
+              printf 'deployment created: %s\n' "${deployment_id}"
+              printf 'pukbot-deployment-id=%s\n' "${deployment_id}"
+              printf 'pukbot-deployment-api-url=%s\n' "${deployment_url}"
+              result="https://github.com/${slug}/deployments"
+              ;;
+            deployment_status)
+              deployment_id=$(jq -er '.deployment_id | select(. >= 1)' payload.json)
+              deployment_url=$(gh api "repos/${slug}/deployments/${deployment_id}" --jq .url)
+              jq '{
+                state,
+                target_url,
+                log_url,
+                environment_url,
+                description,
+                auto_inactive
+              } | with_entries(select(.value != null))' payload.json >request.json
+              deployment_status=$(gh api --method POST \
+                "repos/${slug}/deployments/${deployment_id}/statuses" \
+                --input request.json)
+              status_id=$(jq -er '.id | select(. >= 1)' <<<"${deployment_status}")
+              status_url=$(jq -er '.url | select(startswith("https://api.github.com/"))' \
+                <<<"${deployment_status}")
+              state=$(jq -er '.state' payload.json)
+              printf 'deployment %s status: %s\n' "${deployment_id}" "${state}"
+              printf 'pukbot-deployment-api-url=%s\n' "${deployment_url}"
+              printf 'pukbot-deployment-status-id=%s\n' "${status_id}"
+              printf 'pukbot-deployment-status-api-url=%s\n' "${status_url}"
+              result="https://github.com/${slug}/deployments"
               ;;
             workflow_dispatch)
               workflow=$(jq -er \

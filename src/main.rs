@@ -326,12 +326,24 @@ struct BatchMutationArgs {
     add_assignees: Vec<String>,
     #[arg(long = "remove-assignee")]
     remove_assignees: Vec<String>,
+    #[command(flatten)]
+    actions: BatchActions,
+    #[arg(long, value_enum)]
+    lock_reason: Option<LockReason>,
+    #[command(flatten)]
+    execution: BatchExecutionArgs,
+}
+
+#[derive(Debug, Args)]
+struct BatchActions {
     #[arg(long)]
     close: bool,
     #[arg(long)]
     lock: bool,
-    #[arg(long, value_enum)]
-    lock_reason: Option<LockReason>,
+}
+
+#[derive(Debug, Args)]
+struct BatchExecutionArgs {
     #[arg(long)]
     allow_partial: bool,
     #[arg(long)]
@@ -1071,7 +1083,7 @@ fn run_pull_request(command: PullRequestCommand, json: bool) -> Result<()> {
 }
 
 fn execute_batch(args: BatchMutationArgs, json: bool, pull_request: bool) -> Result<()> {
-    if !args.yes && !args.dry_run {
+    if !args.execution.yes && !args.execution.dry_run {
         bail!("batch operations require --yes");
     }
     let comment = read_optional_message(args.comment.as_deref(), args.comment_file.as_deref())?;
@@ -1084,10 +1096,10 @@ fn execute_batch(args: BatchMutationArgs, json: bool, pull_request: bool) -> Res
             remove_labels: args.remove_labels,
             add_assignees: args.add_assignees,
             remove_assignees: args.remove_assignees,
-            close: args.close,
-            lock: args.lock,
+            close: args.actions.close,
+            lock: args.actions.lock,
             lock_reason: args.lock_reason,
-            allow_partial: args.allow_partial,
+            allow_partial: args.execution.allow_partial,
         }
     } else {
         Request::IssueBatch {
@@ -1098,13 +1110,13 @@ fn execute_batch(args: BatchMutationArgs, json: bool, pull_request: bool) -> Res
             remove_labels: args.remove_labels,
             add_assignees: args.add_assignees,
             remove_assignees: args.remove_assignees,
-            close: args.close,
-            lock: args.lock,
+            close: args.actions.close,
+            lock: args.actions.lock,
             lock_reason: args.lock_reason,
-            allow_partial: args.allow_partial,
+            allow_partial: args.execution.allow_partial,
         }
     };
-    execute(request, args.dry_run, json)
+    execute(request, args.execution.dry_run, json)
 }
 
 fn execute_pull_request_target(args: TargetArgs, json: bool, action: &str) -> Result<()> {

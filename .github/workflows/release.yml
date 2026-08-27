@@ -115,7 +115,7 @@ jobs:
             fi
             for conclusion in "${ci}" "${hygiene}"; do
               case "${conclusion}" in
-                pending | null | '') ;;
+                success | pending | null | '') ;;
                 *) echo "release commit check failed: ${conclusion}" >&2; exit 1 ;;
               esac
             done

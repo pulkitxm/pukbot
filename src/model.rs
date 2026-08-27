@@ -3,7 +3,8 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
+use base64::Engine as _;
 use clap::ValueEnum;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -18,6 +19,7 @@ pub const MAX_WORKFLOW_INPUTS: usize = 25;
 pub const MAX_WORKFLOW_INPUT_PAYLOAD_CHARS: usize = 65_535;
 pub const MAX_REPOSITORY_DISPATCH_PROPERTIES: usize = 10;
 pub const MAX_REPOSITORY_DISPATCH_PAYLOAD_CHARS: usize = 65_535;
+pub const MAX_RELEASE_ASSET_BYTES: usize = 40_000;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Repository {
@@ -100,6 +102,14 @@ pub enum ReviewEvent {
     Approve,
     RequestChanges,
     Comment,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum ReleaseLatest {
+    True,
+    False,
+    Legacy,
 }
 
 #[derive(Debug, Deserialize)]
@@ -276,6 +286,62 @@ pub enum Request {
         event_type: String,
         #[serde(default)]
         client_payload: BTreeMap<String, serde_json::Value>,
+    },
+    RefCreate {
+        repository: Repository,
+        #[serde(rename = "ref")]
+        reference: String,
+        sha: String,
+    },
+    RefDelete {
+        repository: Repository,
+        #[serde(rename = "ref")]
+        reference: String,
+    },
+    TagCreate {
+        repository: Repository,
+        tag: String,
+        target: String,
+        message: Option<String>,
+    },
+    TagDelete {
+        repository: Repository,
+        tag: String,
+    },
+    ReleaseCreate {
+        repository: Repository,
+        tag: String,
+        name: Option<String>,
+        body: Option<String>,
+        target: Option<String>,
+        #[serde(default)]
+        draft: bool,
+        #[serde(default)]
+        prerelease: bool,
+        #[serde(default)]
+        generate_notes: bool,
+    },
+    ReleaseEdit {
+        repository: Repository,
+        release_id: NonZeroU64,
+        tag: Option<String>,
+        name: Option<String>,
+        body: Option<String>,
+        draft: Option<bool>,
+        prerelease: Option<bool>,
+        make_latest: Option<ReleaseLatest>,
+    },
+    ReleaseDelete {
+        repository: Repository,
+        release_id: NonZeroU64,
+    },
+    ReleaseAssetUpload {
+        repository: Repository,
+        release_id: NonZeroU64,
+        name: String,
+        label: Option<String>,
+        content_type: String,
+        content_base64: String,
     },
     WorkflowDispatch {
         repository: Repository,
@@ -566,6 +632,149 @@ impl Request {
                     client_payload,
                 })
             }
+            Self::RefCreate {
+                repository,
+                reference,
+                sha,
+            } => {
+                validate_full_ref(&reference)?;
+                validate_git_object_sha(&sha)?;
+                Ok(Operation::RefCreate {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    reference,
+                    sha,
+                })
+            }
+            Self::RefDelete {
+                repository,
+                reference,
+            } => {
+                validate_full_ref(&reference)?;
+                Ok(Operation::RefDelete {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    reference,
+                })
+            }
+            Self::TagCreate {
+                repository,
+                tag,
+                target,
+                message,
+            } => {
+                validate_tag(&tag)?;
+                validate_git_object_sha(&target)?;
+                if let Some(message) = &message {
+                    validate_commit_message(message)?;
+                }
+                Ok(Operation::TagCreate {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    tag,
+                    target,
+                    message,
+                })
+            }
+            Self::TagDelete { repository, tag } => {
+                validate_tag(&tag)?;
+                Ok(Operation::TagDelete {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    tag,
+                })
+            }
+            Self::ReleaseCreate {
+                repository,
+                tag,
+                name,
+                body,
+                target,
+                draft,
+                prerelease,
+                generate_notes,
+            } => {
+                validate_tag(&tag)?;
+                validate_optional_release_name(name.as_deref())?;
+                validate_optional_body(body.as_deref())?;
+                if let Some(target) = &target {
+                    validate_branch(target)?;
+                }
+                Ok(Operation::ReleaseCreate {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    tag,
+                    name,
+                    body,
+                    target,
+                    draft,
+                    prerelease,
+                    generate_notes,
+                })
+            }
+            Self::ReleaseEdit {
+                repository,
+                release_id,
+                tag,
+                name,
+                body,
+                draft,
+                prerelease,
+                make_latest,
+            } => {
+                if tag.is_none()
+                    && name.is_none()
+                    && body.is_none()
+                    && draft.is_none()
+                    && prerelease.is_none()
+                    && make_latest.is_none()
+                {
+                    bail!("release edit requires at least one changed field");
+                }
+                if let Some(tag) = &tag {
+                    validate_tag(tag)?;
+                }
+                validate_optional_release_name(name.as_deref())?;
+                validate_optional_body(body.as_deref())?;
+                Ok(Operation::ReleaseEdit {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    release_id,
+                    tag,
+                    name,
+                    body,
+                    draft,
+                    prerelease,
+                    make_latest,
+                })
+            }
+            Self::ReleaseDelete {
+                repository,
+                release_id,
+            } => Ok(Operation::ReleaseDelete {
+                owner: repository.owner,
+                repository: repository.name,
+                release_id,
+            }),
+            Self::ReleaseAssetUpload {
+                repository,
+                release_id,
+                name,
+                label,
+                content_type,
+                content_base64,
+            } => {
+                validate_release_asset(&name, label.as_deref(), &content_type, &content_base64)?;
+                Ok(Operation::ReleaseAssetUpload {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    release_id,
+                    name,
+                    label,
+                    content_type,
+                    content_base64,
+                })
+            }
             Self::WorkflowDispatch {
                 repository,
                 workflow,
@@ -786,6 +995,67 @@ pub enum Operation {
         event_type: String,
         client_payload: BTreeMap<String, serde_json::Value>,
     },
+    RefCreate {
+        owner: String,
+        repository: String,
+        #[serde(rename = "ref")]
+        reference: String,
+        sha: String,
+    },
+    RefDelete {
+        owner: String,
+        repository: String,
+        #[serde(rename = "ref")]
+        reference: String,
+    },
+    TagCreate {
+        owner: String,
+        repository: String,
+        tag: String,
+        target: String,
+        message: Option<String>,
+    },
+    TagDelete {
+        owner: String,
+        repository: String,
+        tag: String,
+    },
+    ReleaseCreate {
+        owner: String,
+        repository: String,
+        tag: String,
+        name: Option<String>,
+        body: Option<String>,
+        target: Option<String>,
+        draft: bool,
+        prerelease: bool,
+        generate_notes: bool,
+    },
+    ReleaseEdit {
+        owner: String,
+        repository: String,
+        release_id: NonZeroU64,
+        tag: Option<String>,
+        name: Option<String>,
+        body: Option<String>,
+        draft: Option<bool>,
+        prerelease: Option<bool>,
+        make_latest: Option<ReleaseLatest>,
+    },
+    ReleaseDelete {
+        owner: String,
+        repository: String,
+        release_id: NonZeroU64,
+    },
+    ReleaseAssetUpload {
+        owner: String,
+        repository: String,
+        release_id: NonZeroU64,
+        name: String,
+        label: Option<String>,
+        content_type: String,
+        content_base64: String,
+    },
     WorkflowDispatch {
         owner: String,
         repository: String,
@@ -845,6 +1115,14 @@ impl Operation {
             Self::PullRequestUpdateBranch { .. } => "pull_request_update_branch",
             Self::CommitCreate { .. } => "commit_create",
             Self::RepositoryDispatch { .. } => "repository_dispatch",
+            Self::RefCreate { .. } => "ref_create",
+            Self::RefDelete { .. } => "ref_delete",
+            Self::TagCreate { .. } => "tag_create",
+            Self::TagDelete { .. } => "tag_delete",
+            Self::ReleaseCreate { .. } => "release_create",
+            Self::ReleaseEdit { .. } => "release_edit",
+            Self::ReleaseDelete { .. } => "release_delete",
+            Self::ReleaseAssetUpload { .. } => "release_asset_upload",
             Self::WorkflowDispatch { .. } => "workflow_dispatch",
             Self::WorkflowCancel { .. } => "workflow_cancel",
             Self::WorkflowRerun { .. } => "workflow_rerun",
@@ -1029,6 +1307,73 @@ fn validate_branch(branch: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_full_ref(reference: &str) -> Result<()> {
+    let suffix = reference
+        .strip_prefix("refs/")
+        .filter(|suffix| suffix.contains('/'))
+        .ok_or_else(|| {
+            anyhow::anyhow!("ref must start with refs/ and contain at least two slashes")
+        })?;
+    validate_branch(suffix)
+}
+
+fn validate_tag(tag: &str) -> Result<()> {
+    if tag.starts_with("refs/") {
+        bail!("tag must not include the refs/tags/ prefix");
+    }
+    validate_branch(tag)
+}
+
+fn validate_git_object_sha(sha: &str) -> Result<()> {
+    if sha.len() != 40 || !sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        bail!("Git object SHA must contain exactly 40 hexadecimal characters");
+    }
+    Ok(())
+}
+
+fn validate_optional_release_name(name: Option<&str>) -> Result<()> {
+    if let Some(name) = name {
+        if name.trim().is_empty() || name.len() > 255 || name.chars().any(char::is_control) {
+            bail!("release name must be between 1 and 255 bytes without control characters");
+        }
+    }
+    Ok(())
+}
+
+fn validate_release_asset(
+    name: &str,
+    label: Option<&str>,
+    content_type: &str,
+    content_base64: &str,
+) -> Result<()> {
+    if name.trim().is_empty()
+        || name.len() > 255
+        || name.contains(['/', '\\'])
+        || name.chars().any(char::is_control)
+    {
+        bail!("release asset name must be between 1 and 255 bytes without slashes or controls");
+    }
+    if let Some(label) = label {
+        if label.trim().is_empty() || label.len() > 255 || label.chars().any(char::is_control) {
+            bail!("release asset label must be between 1 and 255 bytes without controls");
+        }
+    }
+    if content_type.trim().is_empty()
+        || content_type.len() > 255
+        || !content_type.contains('/')
+        || content_type.chars().any(char::is_control)
+    {
+        bail!("release asset content type must be a valid MIME type");
+    }
+    let content = base64::engine::general_purpose::STANDARD
+        .decode(content_base64)
+        .context("release asset content must be valid base64")?;
+    if content.is_empty() || content.len() > MAX_RELEASE_ASSET_BYTES {
+        bail!("release asset must be between 1 and {MAX_RELEASE_ASSET_BYTES} bytes");
+    }
+    Ok(())
+}
+
 fn validate_workflow(workflow: &str) -> Result<()> {
     if workflow.is_empty()
         || workflow.len() > 255
@@ -1195,6 +1540,8 @@ fn is_repository_character(character: char) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine as _;
+
     use super::{Operation, Reaction, Repository, Request, unclosed_code_fence};
 
     #[test]
@@ -1322,6 +1669,14 @@ mod tests {
             r#"{"operation":"pull_request_update_branch","repository":"owner/repo","number":1}"#,
             r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"data: update roster","files":[{"path":"data/members.json","content":"[]"},{"path":"data/old.json","delete":true}]}"#,
             r#"{"operation":"repository_dispatch","repository":"owner/repo","event_type":"apt-release","client_payload":{"version":"1.2.3"}}"#,
+            r#"{"operation":"ref_create","repository":"owner/repo","ref":"refs/heads/release","sha":"0123456789abcdef0123456789abcdef01234567"}"#,
+            r#"{"operation":"ref_delete","repository":"owner/repo","ref":"refs/heads/release"}"#,
+            r#"{"operation":"tag_create","repository":"owner/repo","tag":"v1.2.3","target":"0123456789abcdef0123456789abcdef01234567","message":"release 1.2.3"}"#,
+            r#"{"operation":"tag_delete","repository":"owner/repo","tag":"v1.2.3"}"#,
+            r#"{"operation":"release_create","repository":"owner/repo","tag":"v1.2.3","name":"Release 1.2.3","body":"notes","target":"main","draft":false,"prerelease":false,"generate_notes":true}"#,
+            r#"{"operation":"release_edit","repository":"owner/repo","release_id":1,"name":"Release 1.2.3","draft":false,"make_latest":"true"}"#,
+            r#"{"operation":"release_delete","repository":"owner/repo","release_id":1}"#,
+            r#"{"operation":"release_asset_upload","repository":"owner/repo","release_id":1,"name":"checksums.txt","label":"checksums","content_type":"text/plain","content_base64":"aGVsbG8="}"#,
             r#"{"operation":"workflow_dispatch","repository":"owner/repo","workflow":"release.yml","ref":"main","inputs":{"release":"true"}}"#,
             r#"{"operation":"workflow_cancel","repository":"owner/repo","run_id":1}"#,
             r#"{"operation":"workflow_rerun","repository":"owner/repo","run_id":1,"failed_only":true}"#,
@@ -1400,6 +1755,182 @@ mod tests {
                 "client_payload": {"retry": false, "version": "1.2.3"}
             })
         );
+    }
+
+    #[test]
+    fn serializes_ref_and_tag_contracts() {
+        let documents = [
+            (
+                r#"{"operation":"ref_create","repository":"owner/repo","ref":"refs/heads/release","sha":"0123456789abcdef0123456789abcdef01234567"}"#,
+                serde_json::json!({
+                    "operation": "ref_create",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "ref": "refs/heads/release",
+                    "sha": "0123456789abcdef0123456789abcdef01234567"
+                }),
+            ),
+            (
+                r#"{"operation":"ref_delete","repository":"owner/repo","ref":"refs/heads/release"}"#,
+                serde_json::json!({
+                    "operation": "ref_delete",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "ref": "refs/heads/release"
+                }),
+            ),
+            (
+                r#"{"operation":"tag_create","repository":"owner/repo","tag":"v1.2.3","target":"0123456789abcdef0123456789abcdef01234567","message":"release 1.2.3"}"#,
+                serde_json::json!({
+                    "operation": "tag_create",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "tag": "v1.2.3",
+                    "target": "0123456789abcdef0123456789abcdef01234567",
+                    "message": "release 1.2.3"
+                }),
+            ),
+            (
+                r#"{"operation":"tag_create","repository":"owner/repo","tag":"v1.2.3","target":"0123456789abcdef0123456789abcdef01234567"}"#,
+                serde_json::json!({
+                    "operation": "tag_create",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "tag": "v1.2.3",
+                    "target": "0123456789abcdef0123456789abcdef01234567",
+                    "message": null
+                }),
+            ),
+            (
+                r#"{"operation":"tag_delete","repository":"owner/repo","tag":"v1.2.3"}"#,
+                serde_json::json!({
+                    "operation": "tag_delete",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "tag": "v1.2.3"
+                }),
+            ),
+        ];
+
+        for (document, expected) in documents {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            let operation = request.prepare(true).expect("request should prepare");
+            assert_eq!(
+                serde_json::to_value(operation).expect("operation should serialize"),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_refs_tags_and_shas() {
+        let documents = [
+            r#"{"operation":"ref_create","repository":"owner/repo","ref":"main","sha":"0123456789abcdef0123456789abcdef01234567"}"#,
+            r#"{"operation":"ref_create","repository":"owner/repo","ref":"refs/heads/../main","sha":"0123456789abcdef0123456789abcdef01234567"}"#,
+            r#"{"operation":"ref_create","repository":"owner/repo","ref":"refs/heads/release","sha":"abc"}"#,
+            r#"{"operation":"tag_create","repository":"owner/repo","tag":"refs/tags/v1","target":"0123456789abcdef0123456789abcdef01234567"}"#,
+            r#"{"operation":"tag_create","repository":"owner/repo","tag":"v1","target":"not-a-sha"}"#,
+        ];
+
+        for document in documents {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            assert!(request.prepare(true).is_err());
+        }
+    }
+
+    #[test]
+    fn serializes_release_contracts() {
+        let documents = [
+            (
+                r#"{"operation":"release_create","repository":"owner/repo","tag":"v1.2.3","name":"Release 1.2.3","body":"notes","target":"main","generate_notes":true}"#,
+                serde_json::json!({
+                    "operation": "release_create",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "tag": "v1.2.3",
+                    "name": "Release 1.2.3",
+                    "body": "notes",
+                    "target": "main",
+                    "draft": false,
+                    "prerelease": false,
+                    "generate_notes": true
+                }),
+            ),
+            (
+                r#"{"operation":"release_edit","repository":"owner/repo","release_id":42,"tag":"v1.2.4","name":"Release 1.2.4","body":"updated","draft":false,"prerelease":true,"make_latest":"legacy"}"#,
+                serde_json::json!({
+                    "operation": "release_edit",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "release_id": 42,
+                    "tag": "v1.2.4",
+                    "name": "Release 1.2.4",
+                    "body": "updated",
+                    "draft": false,
+                    "prerelease": true,
+                    "make_latest": "legacy"
+                }),
+            ),
+            (
+                r#"{"operation":"release_delete","repository":"owner/repo","release_id":42}"#,
+                serde_json::json!({
+                    "operation": "release_delete",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "release_id": 42
+                }),
+            ),
+            (
+                r#"{"operation":"release_asset_upload","repository":"owner/repo","release_id":42,"name":"checksums.txt","label":"checksums","content_type":"text/plain","content_base64":"aGVsbG8="}"#,
+                serde_json::json!({
+                    "operation": "release_asset_upload",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "release_id": 42,
+                    "name": "checksums.txt",
+                    "label": "checksums",
+                    "content_type": "text/plain",
+                    "content_base64": "aGVsbG8="
+                }),
+            ),
+        ];
+
+        for (document, expected) in documents {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            let operation = request.prepare(true).expect("request should prepare");
+            assert_eq!(
+                serde_json::to_value(operation).expect("operation should serialize"),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_release_requests() {
+        let documents = [
+            r#"{"operation":"release_edit","repository":"owner/repo","release_id":1}"#,
+            r#"{"operation":"release_create","repository":"owner/repo","tag":"refs/tags/v1"}"#,
+            r#"{"operation":"release_asset_upload","repository":"owner/repo","release_id":1,"name":"../asset","content_type":"text/plain","content_base64":"aGVsbG8="}"#,
+            r#"{"operation":"release_asset_upload","repository":"owner/repo","release_id":1,"name":"asset","content_type":"invalid","content_base64":"aGVsbG8="}"#,
+            r#"{"operation":"release_asset_upload","repository":"owner/repo","release_id":1,"name":"asset","content_type":"text/plain","content_base64":"not-base64"}"#,
+        ];
+
+        for document in documents {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            assert!(request.prepare(true).is_err());
+        }
+
+        let content_base64 = base64::engine::general_purpose::STANDARD.encode(vec![0; 40_001]);
+        let document = serde_json::json!({
+            "operation": "release_asset_upload",
+            "repository": "owner/repo",
+            "release_id": 1,
+            "name": "asset.bin",
+            "content_type": "application/octet-stream",
+            "content_base64": content_base64
+        });
+        let request = serde_json::from_value::<Request>(document).expect("request should parse");
+        assert!(request.prepare(true).is_err());
     }
 
     #[test]

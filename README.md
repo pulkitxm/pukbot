@@ -184,6 +184,28 @@ pukbot commit create --repo owner/repository --branch main --message "data: upda
 Only text content is supported today; staged binary files are rejected
 before dispatch.
 
+Create and delete Git refs, lightweight tags, and annotated tags through the
+App:
+
+```bash
+pukbot ref create refs/heads/release --repo owner/repository --sha COMMIT_SHA
+pukbot tag create v1.2.3 --repo owner/repository --target COMMIT_SHA
+pukbot tag create v1.2.3 --repo owner/repository --target COMMIT_SHA \
+  --message "Release 1.2.3"
+```
+
+Manage releases and upload assets as Pukbot:
+
+```bash
+pukbot release create v1.2.3 --repo owner/repository --name "Release 1.2.3"
+pukbot release edit 123 --repo owner/repository --prerelease false
+pukbot release upload-asset 123 checksums.txt --repo owner/repository
+pukbot release delete 123 --repo owner/repository --yes
+```
+
+Typed release asset uploads preserve binary content and MIME type up to 40,000
+bytes per asset.
+
 Dispatch a workflow as the Pukbot App and receive the created run URL:
 
 ```bash
@@ -264,6 +286,8 @@ Authored by the Pukbot App, executed inside the protected workflow:
 - every `comment` and `issue` operation
 - `commit create`
 - `repository dispatch`
+- ref and tag create and delete
+- release create, edit, delete, and asset upload
 - workflow dispatch, cancel, rerun, enable, and disable
 
 Pukbot can replace the actor that requests a workflow run or performs a GitHub

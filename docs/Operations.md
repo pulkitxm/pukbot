@@ -374,6 +374,61 @@ Only text content is supported. Staged binary files (images, video, and
 other non-UTF-8 content) are rejected before any request is sent; commit
 those with local git for now.
 
+## Git refs and tags
+
+```bash
+pukbot ref create refs/heads/release --repo owner/repository --sha COMMIT_SHA
+pukbot ref delete refs/heads/release --repo owner/repository --yes
+pukbot tag create v1.2.3 --repo owner/repository --target COMMIT_SHA
+pukbot tag create v1.2.3 --repo owner/repository --target COMMIT_SHA \
+  --message "Release 1.2.3"
+pukbot tag delete v1.2.3 --repo owner/repository --yes
+```
+
+Ref operations require the complete `refs/...` name and a 40-character Git
+object SHA. Tag names omit the `refs/tags/` prefix. `tag create` makes a
+lightweight tag when no message is present and an annotated tag when a message
+is present. Annotated tag objects record `pukbot[bot]` as the tagger.
+
+The typed operations are `ref_create`, `ref_delete`, `tag_create`, and
+`tag_delete`. Ref and tag deletion require confirmation in command mode.
+
+## Releases
+
+```bash
+pukbot release create v1.2.3 \
+  --repo owner/repository \
+  --name "Release 1.2.3" \
+  --body-file notes.md \
+  --target main \
+  --generate-notes
+
+pukbot release edit 123 \
+  --repo owner/repository \
+  --name "Release 1.2.3" \
+  --draft false \
+  --prerelease false \
+  --make-latest true
+
+pukbot release upload-asset 123 checksums.txt \
+  --repo owner/repository \
+  --label "SHA-256 checksums" \
+  --content-type text/plain
+
+pukbot release delete 123 --repo owner/repository --yes
+```
+
+The typed operations are `release_create`, `release_edit`, `release_delete`,
+and `release_asset_upload`. Edit addresses a release by its numeric database
+ID and requires at least one changed field. `make_latest` accepts `true`,
+`false`, or `legacy`.
+
+Asset upload reads the local file, infers its MIME type when none is supplied,
+and carries its base64-encoded bytes through the protected typed operation.
+Assets must be between 1 and 40,000 bytes so the complete operation remains
+within GitHub's workflow input limit. The JSON field is `content_base64`.
+Pukbot returns the release URL or uploaded asset download URL.
+
 ## Permissions
 
 The protected operation workflow requests only the permissions required for

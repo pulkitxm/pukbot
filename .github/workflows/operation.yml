@@ -252,20 +252,38 @@ jobs:
               source_path=$(jq -r '.source_path // empty' payload.json)
               replace=$(jq -r '.replace' payload.json)
               authenticated="https://x-access-token:${GH_TOKEN}@github.com"
-              git clone --quiet "${authenticated}/${slug}.wiki.git" wiki
+              printf 'wiki publish: cloning %s wiki\n' "${slug}"
+              if ! git clone --quiet "${authenticated}/${slug}.wiki.git" wiki; then
+                printf 'wiki publish failed: the wiki is unavailable or inaccessible\n' >&2
+                exit 1
+              fi
               if [ "${replace}" = true ]; then
+                printf 'wiki publish: replacing existing content\n'
                 git -C wiki rm -q -r --ignore-unmatch .
               fi
               if [ -n "${source_ref}" ]; then
+                printf 'wiki publish: fetching %s at %s\n' "${source_ref}" "${source_path}"
                 git init -q source
                 git -C source remote add origin "${authenticated}/${slug}.git"
-                git -C source fetch --quiet --depth 1 origin "${source_ref}"
+                if ! git -C source fetch --quiet --depth 1 origin "${source_ref}"; then
+                  printf 'wiki publish failed: source ref was not found\n' >&2
+                  exit 1
+                fi
                 git -C source checkout --quiet --detach FETCH_HEAD
-                test -d "source/${source_path}"
+                if [ ! -d "source/${source_path}" ]; then
+                  printf 'wiki publish failed: source path is not a directory\n' >&2
+                  exit 1
+                fi
                 git -C source ls-files -z -- "${source_path}" >source-files
                 file_count=$(tr -cd '\0' <source-files | wc -c)
-                test "${file_count}" -ge 1
-                test "${file_count}" -le 500
+                if [ "${file_count}" -lt 1 ]; then
+                  printf 'wiki publish failed: source path contains no tracked files\n' >&2
+                  exit 1
+                fi
+                if [ "${file_count}" -gt 500 ]; then
+                  printf 'wiki publish failed: source exceeds the 500 file limit\n' >&2
+                  exit 1
+                fi
                 total_bytes=0
                 while IFS= read -r -d '' path; do
                   relative=${path}
@@ -274,25 +292,40 @@ jobs:
                     test "${relative}" != "${path}"
                   fi
                   test -n "${relative}"
-                  test -f "source/${path}"
-                  test ! -L "source/${path}"
+                  if [ ! -f "source/${path}" ] || [ -L "source/${path}" ]; then
+                    printf 'wiki publish failed: source contains a non-file or symlink\n' >&2
+                    exit 1
+                  fi
                   total_bytes=$((total_bytes + $(wc -c <"source/${path}")))
-                  test "${total_bytes}" -le 20000000
+                  if [ "${total_bytes}" -gt 20000000 ]; then
+                    printf 'wiki publish failed: source exceeds the 20000000 byte limit\n' >&2
+                    exit 1
+                  fi
                   mkdir -p "wiki/$(dirname "${relative}")"
                   cp "source/${path}" "wiki/${relative}"
                 done <source-files
+                printf 'wiki publish: prepared %s files totaling %s bytes\n' "${file_count}" "${total_bytes}"
+              fi
+              delete_count=$(jq '.delete | length' payload.json)
+              if [ "${delete_count}" -gt 0 ]; then
+                printf 'wiki publish: applying %s deletions\n' "${delete_count}"
               fi
               while IFS= read -r path; do
                 test -z "${path}" || rm -f -- "wiki/${path}"
               done < <(jq -r '.delete[]' payload.json)
               git -C wiki add -A
-              test -n "$(git -C wiki status --porcelain)"
+              if [ -z "$(git -C wiki status --porcelain)" ]; then
+                printf 'wiki publish failed: the requested content already matches the wiki\n' >&2
+                exit 1
+              fi
               committer_login='pukbot[bot]'
               committer_id=$(gh api "users/pukbot%5Bbot%5D" --jq .id)
               git -C wiki config user.name "${committer_login}"
               git -C wiki config user.email "${committer_id}+${committer_login}@users.noreply.github.com"
               git -C wiki commit -q -F ../message.txt
               git -C wiki push -q origin HEAD
+              commit_sha=$(git -C wiki rev-parse HEAD)
+              printf 'wiki publish: pushed commit %s\n' "${commit_sha}"
               result="https://github.com/${slug}/wiki"
               ;;
             repository_dispatch)

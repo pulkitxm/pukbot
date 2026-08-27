@@ -210,9 +210,16 @@ jobs:
               sha=$(jq -er '.sha | select(test("^[0-9A-Fa-f]{40}$"))' payload.json)
               jq -n --arg ref "${reference}" --arg sha "${sha}" '{ref: $ref, sha: $sha}' >request.json
               gh api --method POST "repos/${slug}/git/refs" --input request.json >/dev/null
-              short_ref=${reference#refs/}
-              encoded_ref=$(jq -rn --arg value "${short_ref}" '$value | @uri')
-              result="https://github.com/${slug}/tree/${encoded_ref}"
+              result="https://github.com/${slug}"
+              if [[ "${reference}" = refs/heads/* ]]; then
+                branch=${reference#refs/heads/}
+                encoded_branch=$(jq -rn --arg value "${branch}" '$value | @uri')
+                result="https://github.com/${slug}/tree/${encoded_branch}"
+              elif [[ "${reference}" = refs/tags/* ]]; then
+                tag=${reference#refs/tags/}
+                encoded_tag=$(jq -rn --arg value "${tag}" '$value | @uri')
+                result="https://github.com/${slug}/tree/${encoded_tag}"
+              fi
               ;;
             ref_delete)
               reference=$(jq -er '.ref | select(startswith("refs/") and length <= 260)' payload.json)
@@ -284,15 +291,20 @@ jobs:
               jq -j '.content_base64' payload.json | base64 --decode >asset.bin
               test -s asset.bin
               test "$(wc -c <asset.bin)" -le 40000
+              upload_url=$(gh api "repos/${slug}/releases/${release_id}" --jq '.upload_url | sub("\\{.*"; "")')
               encoded_name=$(jq -rn --arg value "${name}" '$value | @uri')
-              endpoint="repos/${slug}/releases/${release_id}/assets?name=${encoded_name}"
+              endpoint="${upload_url}?name=${encoded_name}"
               if [ -n "${label}" ]; then
                 encoded_label=$(jq -rn --arg value "${label}" '$value | @uri')
                 endpoint="${endpoint}&label=${encoded_label}"
               fi
-              result=$(gh api --hostname uploads.github.com --method POST \
-                -H "Content-Type: ${content_type}" --input asset.bin "${endpoint}" \
-                --jq .browser_download_url)
+              result=$(curl --fail-with-body --silent --show-error --location \
+                --request POST \
+                --header 'Accept: application/vnd.github+json' \
+                --header "Authorization: Bearer ${GH_TOKEN}" \
+                --header 'X-GitHub-Api-Version: 2026-03-10' \
+                --header "Content-Type: ${content_type}" \
+                --data-binary @asset.bin "${endpoint}" | jq -er .browser_download_url)
               ;;
             workflow_dispatch)
               workflow=$(jq -er \

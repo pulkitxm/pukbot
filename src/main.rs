@@ -78,6 +78,10 @@ enum Commands {
         #[command(subcommand)]
         command: CommitCommand,
     },
+    Wiki {
+        #[command(subcommand)]
+        command: WikiCommand,
+    },
     Repository {
         #[command(subcommand)]
         command: RepositoryCommand,
@@ -170,6 +174,11 @@ enum PullRequestCommand {
 #[derive(Debug, Subcommand)]
 enum CommitCommand {
     Create(CommitCreateArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum WikiCommand {
+    Publish(WikiPublishArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -292,6 +301,24 @@ struct CommitCreateArgs {
     paths: Vec<PathBuf>,
     #[arg(long)]
     as_app: bool,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct WikiPublishArgs {
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long, requires = "source_path")]
+    source_ref: Option<String>,
+    #[arg(long, requires = "source_ref")]
+    source_path: Option<String>,
+    #[arg(long = "delete", value_name = "PATH")]
+    delete: Vec<String>,
+    #[arg(long)]
+    replace: bool,
+    #[command(flatten)]
+    content: MessageArgs,
     #[arg(long)]
     dry_run: bool,
 }
@@ -714,6 +741,7 @@ fn run() -> Result<()> {
         Commands::Issue { command } => run_issue(command, cli.json),
         Commands::Pr { command } => run_pull_request(command, cli.json),
         Commands::Commit { command } => run_commit(command, cli.json),
+        Commands::Wiki { command } => run_wiki(command, cli.json),
         Commands::Repository { command } => run_repository(command, cli.json),
         Commands::Ref { command } => run_git_ref(command, cli.json),
         Commands::Tag { command } => run_tag(command, cli.json),
@@ -1044,6 +1072,23 @@ fn run_commit(command: CommitCommand, json: bool) -> Result<()> {
                 json,
             )
         }
+    }
+}
+
+fn run_wiki(command: WikiCommand, json: bool) -> Result<()> {
+    match command {
+        WikiCommand::Publish(args) => execute(
+            Request::WikiPublish {
+                repository: args.repo,
+                message: read_message(&args.content)?,
+                source_ref: args.source_ref,
+                source_path: args.source_path,
+                delete: args.delete,
+                replace: args.replace,
+            },
+            args.dry_run,
+            json,
+        ),
     }
 }
 
@@ -1522,6 +1567,7 @@ fn capabilities() -> Capabilities {
             "pr.react",
             "pr.update-branch",
             "commit.create",
+            "wiki.publish",
             "repository.dispatch",
             "ref.create",
             "ref.delete",
@@ -1585,6 +1631,7 @@ fn attribution_capabilities() -> Attribution {
             "pr.review",
             "pr.update-branch",
             "commit.create",
+            "wiki.publish",
             "repository.dispatch",
             "ref.create",
             "ref.delete",

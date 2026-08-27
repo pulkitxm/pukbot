@@ -20,6 +20,7 @@ pub const MAX_WORKFLOW_INPUT_PAYLOAD_CHARS: usize = 65_535;
 pub const MAX_REPOSITORY_DISPATCH_PROPERTIES: usize = 10;
 pub const MAX_REPOSITORY_DISPATCH_PAYLOAD_CHARS: usize = 65_535;
 pub const MAX_RELEASE_ASSET_BYTES: usize = 40_000;
+pub const MAX_WIKI_DELETE_PATHS: usize = 500;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Repository {
@@ -292,6 +293,16 @@ pub enum Request {
         files: Vec<CommitFileDocument>,
         #[serde(default)]
         as_app: bool,
+    },
+    WikiPublish {
+        repository: Repository,
+        message: String,
+        source_ref: Option<String>,
+        source_path: Option<String>,
+        #[serde(default)]
+        delete: Vec<String>,
+        #[serde(default)]
+        replace: bool,
     },
     RepositoryDispatch {
         repository: Repository,
@@ -645,6 +656,33 @@ impl Request {
                     message,
                     files: prepare_commit_files(files)?,
                     as_app,
+                })
+            }
+            Self::WikiPublish {
+                repository,
+                message,
+                source_ref,
+                source_path,
+                delete,
+                replace,
+            } => {
+                validate_commit_message(&message)?;
+                validate_wiki_source(source_ref.as_deref(), source_path.as_deref())?;
+                let delete = prepare_wiki_delete_paths(delete)?;
+                if source_ref.is_none() && delete.is_empty() {
+                    bail!("wiki publish requires a source or at least one deleted path");
+                }
+                if replace && !delete.is_empty() {
+                    bail!("wiki publish cannot combine replace with deleted paths");
+                }
+                Ok(Operation::WikiPublish {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    message,
+                    source_ref,
+                    source_path,
+                    delete,
+                    replace,
                 })
             }
             Self::RepositoryDispatch {
@@ -1023,6 +1061,15 @@ pub enum Operation {
         files: Vec<CommitFile>,
         as_app: bool,
     },
+    WikiPublish {
+        owner: String,
+        repository: String,
+        message: String,
+        source_ref: Option<String>,
+        source_path: Option<String>,
+        delete: Vec<String>,
+        replace: bool,
+    },
     RepositoryDispatch {
         owner: String,
         repository: String,
@@ -1148,6 +1195,7 @@ impl Operation {
             Self::PullRequestReact { .. } => "pull_request_react",
             Self::PullRequestUpdateBranch { .. } => "pull_request_update_branch",
             Self::CommitCreate { .. } => "commit_create",
+            Self::WikiPublish { .. } => "wiki_publish",
             Self::RepositoryDispatch { .. } => "repository_dispatch",
             Self::RefCreate { .. } => "ref_create",
             Self::RefDelete { .. } => "ref_delete",
@@ -1498,6 +1546,34 @@ fn validate_commit_path(path: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_wiki_source(source_ref: Option<&str>, source_path: Option<&str>) -> Result<()> {
+    match (source_ref, source_path) {
+        (Some(reference), Some(path)) => {
+            validate_branch(reference)?;
+            if path != "." {
+                validate_commit_path(path)?;
+            }
+        }
+        (None, None) => {}
+        _ => bail!("wiki source ref and path must be provided together"),
+    }
+    Ok(())
+}
+
+fn prepare_wiki_delete_paths(paths: Vec<String>) -> Result<Vec<String>> {
+    if paths.len() > MAX_WIKI_DELETE_PATHS {
+        bail!("wiki publish supports at most {MAX_WIKI_DELETE_PATHS} deleted paths");
+    }
+    let mut seen = HashSet::new();
+    for path in &paths {
+        validate_commit_path(path)?;
+        if !seen.insert(path.clone()) {
+            bail!("duplicate wiki delete path: {path}");
+        }
+    }
+    Ok(paths)
+}
+
 fn prepare_commit_files(files: Vec<CommitFileDocument>) -> Result<Vec<CommitFile>> {
     if files.is_empty() {
         bail!("commit requires at least one file");
@@ -1722,6 +1798,7 @@ mod tests {
             r#"{"operation":"pull_request_react","repository":"owner/repo","number":1,"reaction":"eyes"}"#,
             r#"{"operation":"pull_request_update_branch","repository":"owner/repo","number":1}"#,
             r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"data: update roster","files":[{"path":"data/members.json","content":"[]"},{"path":"data/old.json","delete":true}]}"#,
+            r#"{"operation":"wiki_publish","repository":"owner/repo","message":"docs: publish wiki","source_ref":"main","source_path":"wiki","delete":["Old.md"],"replace":false}"#,
             r#"{"operation":"repository_dispatch","repository":"owner/repo","event_type":"apt-release","client_payload":{"version":"1.2.3"}}"#,
             r#"{"operation":"ref_create","repository":"owner/repo","ref":"refs/heads/release","sha":"0123456789abcdef0123456789abcdef01234567"}"#,
             r#"{"operation":"ref_delete","repository":"owner/repo","ref":"refs/heads/release"}"#,
@@ -1767,6 +1844,33 @@ mod tests {
     fn rejects_commit_with_no_files() {
         let request = serde_json::from_str::<Request>(
             r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"m","files":[]}"#,
+        )
+        .expect("request should parse");
+        assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn rejects_incomplete_wiki_source() {
+        let request = serde_json::from_str::<Request>(
+            r#"{"operation":"wiki_publish","repository":"owner/repo","message":"docs: publish wiki","source_ref":"main"}"#,
+        )
+        .expect("request should parse");
+        assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn rejects_empty_wiki_publish() {
+        let request = serde_json::from_str::<Request>(
+            r#"{"operation":"wiki_publish","repository":"owner/repo","message":"docs: publish wiki"}"#,
+        )
+        .expect("request should parse");
+        assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn rejects_wiki_delete_path_traversal() {
+        let request = serde_json::from_str::<Request>(
+            r#"{"operation":"wiki_publish","repository":"owner/repo","message":"docs: publish wiki","delete":["../Home.md"]}"#,
         )
         .expect("request should parse");
         assert!(request.prepare(true).is_err());

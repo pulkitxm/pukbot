@@ -2,10 +2,11 @@
 
 Pukbot is designed so agents can perform approved GitHub mutations without
 reading the GitHub App private key or its installation token. For comment,
-issue, and commit operations the agent invokes the public CLI, the CLI
-dispatches a protected workflow, and the workflow mints one short-lived token
-scoped to one repository. Pull request operations run through the user's own
-authenticated GitHub CLI session so the user, not the App, is the author.
+issue, commit, and workflow dispatch operations the agent invokes the public
+CLI, the CLI dispatches a protected workflow, and the workflow mints one
+short-lived token scoped to one repository. Pull request operations run
+through the user's own authenticated GitHub CLI session so the user, not the
+App, is the author.
 
 Add this policy to `AGENTS.md`:
 

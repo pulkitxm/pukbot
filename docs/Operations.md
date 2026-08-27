@@ -239,6 +239,40 @@ from the CLI or your local git config. The branch ref update is never forced:
 if the branch has moved since the commit was built, the operation fails
 instead of overwriting the newer history.
 
+## Workflow dispatches
+
+```bash
+pukbot workflow dispatch release.yml \
+  --repo owner/repository \
+  --ref main \
+  --input release=true \
+  --input channel=stable
+```
+
+The workflow argument is a numeric workflow ID or workflow file name. The
+target workflow must declare a `workflow_dispatch` trigger on its default
+branch. `--ref` selects the branch or tag used for the run. Repeat `--input`
+for each `KEY=VALUE` input. Pukbot returns the created workflow run as
+`resourceUrl`.
+
+The JSON operation is `workflow_dispatch`:
+
+```json
+{
+  "operation": "workflow_dispatch",
+  "repository": "owner/repository",
+  "workflow": "release.yml",
+  "ref": "main",
+  "inputs": {
+    "release": "true",
+    "channel": "stable"
+  }
+}
+```
+
+Inputs are optional. GitHub accepts at most 25 inputs with a combined encoded
+payload of 65,535 characters. Pukbot enforces both limits before dispatch.
+
 ## Attribution
 
 Results report who GitHub records as the actor:
@@ -254,9 +288,9 @@ Results report who GitHub records as the actor:
 
 `authoredBy` is `user` for every `pr` operation, which executes locally under
 the authenticated GitHub CLI session. It is `pukbot` for every `comment`,
-`issue`, and `commit` operation, which executes inside the protected workflow
-under a short-lived App installation token; those results also carry a
-`workflowUrl`.
+`issue`, `commit`, and workflow dispatch operation, which executes inside the
+protected workflow under a short-lived App installation token; those results
+also carry a `workflowUrl`.
 
 `pukbot capabilities --json` reports the same split under `attribution`.
 
@@ -271,7 +305,9 @@ those with local git for now.
 
 ## Permissions
 
-The protected operation workflow requests issue, pull request, and repository
-content write permissions from the Pukbot GitHub App. The App installation must
-include the target repository and grant those permissions. The CLI never
-receives the App private key or its short-lived installation token.
+The protected operation workflow requests only the permissions required for
+each operation. Workflow dispatch uses Actions write access. Other App
+operations use issue, pull request, or repository content write access. The
+App installation must include the target repository and grant the required
+permission. The CLI never receives the App private key or its short-lived
+installation token.

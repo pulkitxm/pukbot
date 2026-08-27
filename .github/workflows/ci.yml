@@ -22,6 +22,9 @@ env:
 jobs:
   format:
     name: Format
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -46,6 +49,9 @@ jobs:
 
   clippy:
     name: Clippy ${{ matrix.toolchain }}
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     strategy:
       fail-fast: false
       matrix:
@@ -67,6 +73,9 @@ jobs:
 
   test:
     name: Test ${{ matrix.os }}
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     strategy:
       fail-fast: false
       matrix:
@@ -89,6 +98,9 @@ jobs:
 
   docs:
     name: Rustdoc
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -109,6 +121,9 @@ jobs:
 
   msrv:
     name: Minimum supported Rust
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -129,6 +144,9 @@ jobs:
 
   features:
     name: Feature powerset
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -143,6 +161,9 @@ jobs:
 
   cross:
     name: Cross build ${{ matrix.target }}
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     strategy:
       fail-fast: false
       matrix:
@@ -169,6 +190,9 @@ jobs:
 
   coverage:
     name: Coverage
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -196,6 +220,9 @@ jobs:
 
   package:
     name: Package and install
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -218,6 +245,9 @@ jobs:
 
   installers:
     name: Installers ${{ matrix.os }}
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     strategy:
       fail-fast: false
       matrix:
@@ -237,7 +267,10 @@ jobs:
 
   ci:
     name: CI
-    if: always()
+    if: >-
+      always()
+      && (github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v'))
     needs:
       - format
       - clippy

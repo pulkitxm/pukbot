@@ -11,6 +11,8 @@ on:
       - 'install.sh'
       - 'install.ps1'
       - '.github/workflows/release.yml'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/hygiene.yml'
   workflow_dispatch:
 
 permissions:

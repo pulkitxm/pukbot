@@ -17,6 +17,9 @@ concurrency:
 jobs:
   repo:
     name: Repository rules
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -53,6 +56,9 @@ jobs:
 
   typos:
     name: Spelling
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -62,6 +68,9 @@ jobs:
 
   editorconfig:
     name: EditorConfig
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -74,6 +83,9 @@ jobs:
 
   toml:
     name: TOML
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -88,6 +100,9 @@ jobs:
 
   yaml:
     name: YAML
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -98,6 +113,9 @@ jobs:
 
   markdown:
     name: Markdown
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -109,6 +127,9 @@ jobs:
 
   shell:
     name: Shell
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -122,6 +143,9 @@ jobs:
 
   powershell:
     name: PowerShell
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -138,6 +162,9 @@ jobs:
 
   actions:
     name: Workflows
+    if: >-
+      github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -151,7 +178,10 @@ jobs:
 
   links:
     name: Links
-    if: github.event_name != 'merge_group'
+    if: >-
+      github.event_name != 'merge_group'
+      && (github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -164,7 +194,10 @@ jobs:
 
   hygiene:
     name: Hygiene
-    if: always()
+    if: >-
+      always()
+      && (github.ref != 'refs/heads/main'
+      || !startsWith(github.event.head_commit.message, 'chore: release v'))
     needs: [repo, typos, editorconfig, toml, yaml, markdown, shell, powershell, actions, links]
     runs-on: ubuntu-latest
     steps:

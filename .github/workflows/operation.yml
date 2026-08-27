@@ -237,6 +237,11 @@ jobs:
                     failure="locking target failed"
                   fi
                 fi
+                if [ -z "${failure}" ] && [ "$(jq -r '.unlock' payload.json)" = true ]; then
+                  if ! gh api --method DELETE "repos/${slug}/issues/${number}/lock" >/dev/null; then
+                    failure="unlocking target failed"
+                  fi
+                fi
                 if [ -n "${failure}" ]; then
                   failures=$((failures + 1))
                   printf 'batch %s #%s: failure, %s\n' "${kind}" "${number}" "${failure}"
@@ -255,6 +260,9 @@ jobs:
               printf 'batch %s complete: %s succeeded, %s failed\n' \
                 "${kind}" "${successes}" "${failures}"
               result="https://github.com/${slug}/issues"
+              if [ "${kind}" = pull_request ]; then
+                result="https://github.com/${slug}/pulls"
+              fi
               if [ "${failures}" -gt 0 ] && [ "${allow_partial}" != true ]; then
                 printf 'batch failed because one or more targets failed\n' >&2
                 exit 1

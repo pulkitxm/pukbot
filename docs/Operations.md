@@ -244,15 +244,16 @@ pukbot pr batch 201 202 \
 ```
 
 Batch commands combine a comment, label additions and removals, assignee
-additions and removals, close, and lock into one typed operation for up to 50
+additions and removals, close, lock, and unlock into one typed operation for up to 50
 unique targets. Lock reasons are `off-topic`, `too-heated`, `resolved`, and
-`spam`. Execution requires `--yes`; `--dry-run` validates and prints the
-complete operation without confirmation.
+`spam`. Lock and unlock cannot be requested together. Execution requires
+`--yes`; `--dry-run` validates and prints the complete operation without
+confirmation.
 
 The JSON operations are `issue_batch` and `pull_request_batch`. They accept
 `numbers`, optional `comment`, `add_labels`, `remove_labels`,
 `add_assignees`, `remove_assignees`, `close`, `lock`,
-`lock_reason`, and `allow_partial`. At least one mutation is required.
+`unlock`, `lock_reason`, and `allow_partial`. At least one mutation is required.
 Duplicate targets and values, conflicting additions and removals, empty
 comments, and issue or pull request type mismatches are rejected.
 

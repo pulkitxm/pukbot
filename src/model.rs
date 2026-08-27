@@ -235,6 +235,8 @@ pub enum Request {
         close: bool,
         #[serde(default)]
         lock: bool,
+        #[serde(default)]
+        unlock: bool,
         lock_reason: Option<LockReason>,
         #[serde(default)]
         allow_partial: bool,
@@ -332,6 +334,8 @@ pub enum Request {
         close: bool,
         #[serde(default)]
         lock: bool,
+        #[serde(default)]
+        unlock: bool,
         lock_reason: Option<LockReason>,
         #[serde(default)]
         allow_partial: bool,
@@ -566,6 +570,7 @@ impl Request {
                 remove_assignees,
                 close,
                 lock,
+                unlock,
                 lock_reason,
                 allow_partial,
             } => prepare_batch(
@@ -577,8 +582,11 @@ impl Request {
                     remove_labels,
                     add_assignees,
                     remove_assignees,
-                    close,
-                    lock,
+                    actions: BatchTargetActions {
+                        close,
+                        lock,
+                        unlock,
+                    },
                     lock_reason,
                     allow_partial,
                 },
@@ -728,6 +736,7 @@ impl Request {
                 remove_assignees,
                 close,
                 lock,
+                unlock,
                 lock_reason,
                 allow_partial,
             } => prepare_batch(
@@ -739,8 +748,11 @@ impl Request {
                     remove_labels,
                     add_assignees,
                     remove_assignees,
-                    close,
-                    lock,
+                    actions: BatchTargetActions {
+                        close,
+                        lock,
+                        unlock,
+                    },
                     lock_reason,
                     allow_partial,
                 },
@@ -1091,6 +1103,7 @@ pub enum Operation {
         remove_assignees: Vec<String>,
         close: bool,
         lock: bool,
+        unlock: bool,
         lock_reason: Option<LockReason>,
         allow_partial: bool,
     },
@@ -1184,6 +1197,7 @@ pub enum Operation {
         remove_assignees: Vec<String>,
         close: bool,
         lock: bool,
+        unlock: bool,
         lock_reason: Option<LockReason>,
         allow_partial: bool,
     },
@@ -1429,10 +1443,15 @@ struct BatchInput {
     remove_labels: Vec<String>,
     add_assignees: Vec<String>,
     remove_assignees: Vec<String>,
-    close: bool,
-    lock: bool,
+    actions: BatchTargetActions,
     lock_reason: Option<LockReason>,
     allow_partial: bool,
+}
+
+struct BatchTargetActions {
+    close: bool,
+    lock: bool,
+    unlock: bool,
 }
 
 fn prepare_batch(
@@ -1452,16 +1471,20 @@ fn prepare_batch(
     }
     validate_batch_values(&input.add_labels, &input.remove_labels, "label")?;
     validate_batch_values(&input.add_assignees, &input.remove_assignees, "assignee")?;
-    if input.lock_reason.is_some() && !input.lock {
+    if input.lock_reason.is_some() && !input.actions.lock {
         bail!("batch lock reason requires lock");
+    }
+    if input.actions.lock && input.actions.unlock {
+        bail!("batch cannot lock and unlock together");
     }
     if input.comment.is_none()
         && input.add_labels.is_empty()
         && input.remove_labels.is_empty()
         && input.add_assignees.is_empty()
         && input.remove_assignees.is_empty()
-        && !input.close
-        && !input.lock
+        && !input.actions.close
+        && !input.actions.lock
+        && !input.actions.unlock
     {
         bail!("batch operation requires at least one mutation");
     }
@@ -1475,8 +1498,9 @@ fn prepare_batch(
             remove_labels: input.remove_labels,
             add_assignees: input.add_assignees,
             remove_assignees: input.remove_assignees,
-            close: input.close,
-            lock: input.lock,
+            close: input.actions.close,
+            lock: input.actions.lock,
+            unlock: input.actions.unlock,
             lock_reason: input.lock_reason,
             allow_partial: input.allow_partial,
         })
@@ -1490,8 +1514,9 @@ fn prepare_batch(
             remove_labels: input.remove_labels,
             add_assignees: input.add_assignees,
             remove_assignees: input.remove_assignees,
-            close: input.close,
-            lock: input.lock,
+            close: input.actions.close,
+            lock: input.actions.lock,
+            unlock: input.actions.unlock,
             lock_reason: input.lock_reason,
             allow_partial: input.allow_partial,
         })
@@ -2125,6 +2150,7 @@ mod tests {
                 "remove_assignees": [],
                 "close": true,
                 "lock": true,
+                "unlock": false,
                 "lock_reason": "resolved",
                 "allow_partial": true
             })
@@ -2138,6 +2164,7 @@ mod tests {
             r#"{"operation":"issue_batch","repository":"owner/repo","numbers":[1,1],"close":true}"#,
             r#"{"operation":"issue_batch","repository":"owner/repo","numbers":[1]}"#,
             r#"{"operation":"issue_batch","repository":"owner/repo","numbers":[1],"lock_reason":"spam"}"#,
+            r#"{"operation":"issue_batch","repository":"owner/repo","numbers":[1],"lock":true,"unlock":true}"#,
             r#"{"operation":"issue_batch","repository":"owner/repo","numbers":[1],"add_labels":["x"],"remove_labels":["x"]}"#,
             r#"{"operation":"pull_request_batch","repository":"owner/repo","numbers":[1],"comment":""}"#,
         ];

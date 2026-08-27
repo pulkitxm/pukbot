@@ -338,8 +338,10 @@ struct BatchMutationArgs {
 struct BatchActions {
     #[arg(long)]
     close: bool,
-    #[arg(long)]
+    #[arg(long, conflicts_with = "unlock")]
     lock: bool,
+    #[arg(long, conflicts_with = "lock")]
+    unlock: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1098,6 +1100,7 @@ fn execute_batch(args: BatchMutationArgs, json: bool, pull_request: bool) -> Res
             remove_assignees: args.remove_assignees,
             close: args.actions.close,
             lock: args.actions.lock,
+            unlock: args.actions.unlock,
             lock_reason: args.lock_reason,
             allow_partial: args.execution.allow_partial,
         }
@@ -1112,6 +1115,7 @@ fn execute_batch(args: BatchMutationArgs, json: bool, pull_request: bool) -> Res
             remove_assignees: args.remove_assignees,
             close: args.actions.close,
             lock: args.actions.lock,
+            unlock: args.actions.unlock,
             lock_reason: args.lock_reason,
             allow_partial: args.execution.allow_partial,
         }

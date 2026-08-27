@@ -171,14 +171,19 @@ pukbot issue create --repo owner/repository --title "bug" --label bug
 pukbot issue labels 123 --repo owner/repository --add urgent --remove stale
 pukbot pr review 456 --repo owner/repository --event approve --body "looks good"
 pukbot pr merge 456 --repo owner/repository --yes
+pukbot pr create --repo owner/repository --title "automated update" \
+  --head automation --base main --as-app
 ```
 
-Commit staged local changes to a branch as the Pukbot bot, atomically,
-through the GitHub Git Data API:
+Commit staged local changes atomically through the GitHub Git Data API. The
+requester is the author by default, while `--as-app` records Pukbot as both
+author and committer:
 
 ```bash
 git add data/members.json
 pukbot commit create --repo owner/repository --branch main --message "data: update roster"
+pukbot commit create --repo owner/repository --branch main \
+  --message "data: automated update" --as-app
 ```
 
 Only text content is supported today; staged binary files are rejected
@@ -281,6 +286,10 @@ The pull request author, the reviewer, the merge event, and the squash commit
 on the base branch are all yours, so the work lands in your GitHub
 contribution history. `workflowUrl` is `null` because no workflow runs.
 
+Pull request create, edit, review, update-branch, and merge accept `--as-app`.
+That explicit mode executes through the protected workflow, records Pukbot as
+the GitHub actor, and returns the workflow URL. App merges remain squash-only.
+
 Authored by the Pukbot App, executed inside the protected workflow:
 
 - every `comment` and `issue` operation
@@ -297,8 +306,9 @@ remain attributable to `github-actions[bot]`.
 
 `commit create` records you as the commit author and the App as the committer,
 so the commit shows as authored by you and committed by Pukbot, and it counts
-toward your contributions. The author identity is derived from the requesting
-account inside the workflow and cannot be set from the CLI.
+toward your contributions. With `--as-app`, Pukbot is both author and
+committer. Identities are derived inside the workflow and cannot be set to an
+arbitrary name or email from the CLI.
 
 ## Agent instructions
 

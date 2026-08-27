@@ -216,6 +216,8 @@ pub enum Request {
         base: String,
         #[serde(default)]
         draft: bool,
+        #[serde(default)]
+        as_app: bool,
     },
     PullRequestEdit {
         repository: Repository,
@@ -223,6 +225,8 @@ pub enum Request {
         title: Option<String>,
         body: Option<String>,
         base: Option<String>,
+        #[serde(default)]
+        as_app: bool,
     },
     PullRequestClose {
         repository: Repository,
@@ -235,6 +239,8 @@ pub enum Request {
     PullRequestMerge {
         repository: Repository,
         number: NonZeroU64,
+        #[serde(default)]
+        as_app: bool,
     },
     PullRequestReady {
         repository: Repository,
@@ -249,6 +255,8 @@ pub enum Request {
         number: NonZeroU64,
         event: ReviewEvent,
         body: Option<String>,
+        #[serde(default)]
+        as_app: bool,
     },
     PullRequestLabels {
         repository: Repository,
@@ -274,12 +282,16 @@ pub enum Request {
     PullRequestUpdateBranch {
         repository: Repository,
         number: NonZeroU64,
+        #[serde(default)]
+        as_app: bool,
     },
     CommitCreate {
         repository: Repository,
         branch: String,
         message: String,
         files: Vec<CommitFileDocument>,
+        #[serde(default)]
+        as_app: bool,
     },
     RepositoryDispatch {
         repository: Repository,
@@ -490,6 +502,7 @@ impl Request {
                 head,
                 base,
                 draft,
+                as_app,
             } => {
                 validate_title(&title)?;
                 validate_optional_body(body.as_deref())?;
@@ -503,6 +516,7 @@ impl Request {
                     head,
                     base,
                     draft,
+                    as_app,
                 })
             }
             Self::PullRequestEdit {
@@ -511,6 +525,7 @@ impl Request {
                 title,
                 body,
                 base,
+                as_app,
             } => {
                 if title.is_none() && body.is_none() && base.is_none() {
                     bail!("pull request edit requires --title, --body, --body-file, or --base");
@@ -529,6 +544,7 @@ impl Request {
                     title,
                     body,
                     base,
+                    as_app,
                 })
             }
             Self::PullRequestClose { repository, number } => Ok(Operation::PullRequestClose {
@@ -541,10 +557,15 @@ impl Request {
                 repository: repository.name,
                 number,
             }),
-            Self::PullRequestMerge { repository, number } => Ok(Operation::PullRequestMerge {
+            Self::PullRequestMerge {
+                repository,
+                number,
+                as_app,
+            } => Ok(Operation::PullRequestMerge {
                 owner: repository.owner,
                 repository: repository.name,
                 number,
+                as_app,
             }),
             Self::PullRequestReady { repository, number } => Ok(Operation::PullRequestReady {
                 owner: repository.owner,
@@ -561,6 +582,7 @@ impl Request {
                 number,
                 event,
                 body,
+                as_app,
             } => {
                 validate_optional_body(body.as_deref())?;
                 if matches!(event, ReviewEvent::RequestChanges) && body.is_none() {
@@ -572,6 +594,7 @@ impl Request {
                     number,
                     event,
                     body,
+                    as_app,
                 })
             }
             Self::PullRequestLabels {
@@ -596,18 +619,22 @@ impl Request {
                 number,
                 reaction,
             }),
-            Self::PullRequestUpdateBranch { repository, number } => {
-                Ok(Operation::PullRequestUpdateBranch {
-                    owner: repository.owner,
-                    repository: repository.name,
-                    number,
-                })
-            }
+            Self::PullRequestUpdateBranch {
+                repository,
+                number,
+                as_app,
+            } => Ok(Operation::PullRequestUpdateBranch {
+                owner: repository.owner,
+                repository: repository.name,
+                number,
+                as_app,
+            }),
             Self::CommitCreate {
                 repository,
                 branch,
                 message,
                 files,
+                as_app,
             } => {
                 validate_branch(&branch)?;
                 validate_commit_message(&message)?;
@@ -617,6 +644,7 @@ impl Request {
                     branch,
                     message,
                     files: prepare_commit_files(files)?,
+                    as_app,
                 })
             }
             Self::RepositoryDispatch {
@@ -916,6 +944,7 @@ pub enum Operation {
         head: String,
         base: String,
         draft: bool,
+        as_app: bool,
     },
     PullRequestEdit {
         owner: String,
@@ -924,6 +953,7 @@ pub enum Operation {
         title: Option<String>,
         body: Option<String>,
         base: Option<String>,
+        as_app: bool,
     },
     PullRequestClose {
         owner: String,
@@ -939,6 +969,7 @@ pub enum Operation {
         owner: String,
         repository: String,
         number: NonZeroU64,
+        as_app: bool,
     },
     PullRequestReady {
         owner: String,
@@ -956,6 +987,7 @@ pub enum Operation {
         number: NonZeroU64,
         event: ReviewEvent,
         body: Option<String>,
+        as_app: bool,
     },
     PullRequestLabels {
         owner: String,
@@ -981,6 +1013,7 @@ pub enum Operation {
         owner: String,
         repository: String,
         number: NonZeroU64,
+        as_app: bool,
     },
     CommitCreate {
         owner: String,
@@ -988,6 +1021,7 @@ pub enum Operation {
         branch: String,
         message: String,
         files: Vec<CommitFile>,
+        as_app: bool,
     },
     RepositoryDispatch {
         owner: String,
@@ -1639,6 +1673,26 @@ mod tests {
             request.prepare(true).expect("request should prepare"),
             Operation::PullRequestReview { .. }
         ));
+    }
+
+    #[test]
+    fn serializes_explicit_app_authorship() {
+        let documents = [
+            r#"{"operation":"pull_request_create","repository":"owner/repo","title":"title","head":"feature","base":"main","as_app":true}"#,
+            r#"{"operation":"pull_request_edit","repository":"owner/repo","number":1,"title":"title","as_app":true}"#,
+            r#"{"operation":"pull_request_merge","repository":"owner/repo","number":1,"as_app":true}"#,
+            r#"{"operation":"pull_request_review","repository":"owner/repo","number":1,"event":"comment","as_app":true}"#,
+            r#"{"operation":"pull_request_update_branch","repository":"owner/repo","number":1,"as_app":true}"#,
+            r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"update","files":[{"path":"data.txt","content":"value"}],"as_app":true}"#,
+        ];
+        for document in documents {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            let operation = request.prepare(true).expect("request should prepare");
+            assert_eq!(
+                serde_json::to_value(operation).expect("operation should serialize")["as_app"],
+                true
+            );
+        }
     }
 
     #[test]

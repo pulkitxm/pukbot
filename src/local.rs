@@ -6,22 +6,22 @@ use serde_json::{Map, Value, json};
 
 use crate::model::{Operation, Reaction, ReviewEvent};
 
-pub const fn runs_locally(operation: &Operation) -> bool {
-    matches!(
-        operation,
-        Operation::PullRequestCreate { .. }
-            | Operation::PullRequestEdit { .. }
-            | Operation::PullRequestClose { .. }
-            | Operation::PullRequestReopen { .. }
-            | Operation::PullRequestMerge { .. }
-            | Operation::PullRequestReady { .. }
-            | Operation::PullRequestDraft { .. }
-            | Operation::PullRequestReview { .. }
-            | Operation::PullRequestLabels { .. }
-            | Operation::PullRequestAssignees { .. }
-            | Operation::PullRequestReact { .. }
-            | Operation::PullRequestUpdateBranch { .. }
-    )
+pub fn runs_locally(operation: &Operation) -> bool {
+    match operation {
+        Operation::PullRequestCreate { as_app, .. }
+        | Operation::PullRequestEdit { as_app, .. }
+        | Operation::PullRequestMerge { as_app, .. }
+        | Operation::PullRequestReview { as_app, .. }
+        | Operation::PullRequestUpdateBranch { as_app, .. } => !as_app,
+        Operation::PullRequestClose { .. }
+        | Operation::PullRequestReopen { .. }
+        | Operation::PullRequestReady { .. }
+        | Operation::PullRequestDraft { .. }
+        | Operation::PullRequestLabels { .. }
+        | Operation::PullRequestAssignees { .. }
+        | Operation::PullRequestReact { .. } => true,
+        _ => false,
+    }
 }
 
 #[expect(
@@ -38,6 +38,7 @@ pub fn execute(operation: &Operation) -> Result<String> {
             head,
             base,
             draft,
+            as_app: _,
         } => {
             let mut request = Map::new();
             request.insert("title".to_owned(), json!(title));
@@ -59,6 +60,7 @@ pub fn execute(operation: &Operation) -> Result<String> {
             title,
             body,
             base,
+            as_app: _,
         } => {
             let mut request = Map::new();
             insert_optional(&mut request, "title", title.as_deref());
@@ -95,6 +97,7 @@ pub fn execute(operation: &Operation) -> Result<String> {
             owner,
             repository,
             number,
+            as_app: _,
         } => {
             let slug = slug(owner, repository);
             api(
@@ -121,6 +124,7 @@ pub fn execute(operation: &Operation) -> Result<String> {
             number,
             event,
             body,
+            as_app: _,
         } => {
             let slug = slug(owner, repository);
             let mut request = Map::new();
@@ -199,6 +203,7 @@ pub fn execute(operation: &Operation) -> Result<String> {
             owner,
             repository,
             number,
+            as_app: _,
         } => {
             let slug = slug(owner, repository);
             api(
@@ -318,8 +323,8 @@ fn encode_path_segment(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{encode_path_segment, pull_request_url, review_event};
-    use crate::model::ReviewEvent;
+    use super::{encode_path_segment, pull_request_url, review_event, runs_locally};
+    use crate::model::{Request, ReviewEvent};
 
     #[test]
     fn encodes_label_path_segments() {
@@ -338,5 +343,27 @@ mod tests {
     #[test]
     fn maps_review_events() {
         assert_eq!(review_event(ReviewEvent::RequestChanges), "REQUEST_CHANGES");
+    }
+
+    #[test]
+    fn routes_explicit_app_modes_through_the_workflow() {
+        let documents = [
+            r#"{"operation":"pull_request_create","repository":"owner/repo","title":"title","head":"feature","base":"main"}"#,
+            r#"{"operation":"pull_request_edit","repository":"owner/repo","number":1,"title":"title"}"#,
+            r#"{"operation":"pull_request_merge","repository":"owner/repo","number":1}"#,
+            r#"{"operation":"pull_request_review","repository":"owner/repo","number":1,"event":"comment"}"#,
+            r#"{"operation":"pull_request_update_branch","repository":"owner/repo","number":1}"#,
+        ];
+        for document in documents {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            let operation = request.prepare(true).expect("request should prepare");
+            assert!(runs_locally(&operation));
+
+            let app_document = document.replace('}', ",\"as_app\":true}");
+            let request =
+                serde_json::from_str::<Request>(&app_document).expect("request should parse");
+            let operation = request.prepare(true).expect("request should prepare");
+            assert!(!runs_locally(&operation));
+        }
     }
 }

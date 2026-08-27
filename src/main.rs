@@ -164,7 +164,7 @@ enum PullRequestCommand {
     Labels(ListEditArgs),
     Assignees(ListEditArgs),
     React(ReactArgs),
-    UpdateBranch(TargetArgs),
+    UpdateBranch(PullRequestUpdateBranchArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -290,6 +290,8 @@ struct CommitCreateArgs {
     content: MessageArgs,
     #[arg(value_name = "PATH")]
     paths: Vec<PathBuf>,
+    #[arg(long)]
+    as_app: bool,
     #[arg(long)]
     dry_run: bool,
 }
@@ -524,6 +526,8 @@ struct ConfirmedTargetArgs {
     #[command(flatten)]
     target: TargetArgs,
     #[arg(long)]
+    as_app: bool,
+    #[arg(long)]
     yes: bool,
 }
 
@@ -571,6 +575,8 @@ struct PullRequestCreateArgs {
     #[arg(long)]
     draft: bool,
     #[arg(long)]
+    as_app: bool,
+    #[arg(long)]
     dry_run: bool,
 }
 
@@ -586,6 +592,8 @@ struct PullRequestEditArgs {
     #[command(flatten)]
     content: BodyArgs,
     #[arg(long)]
+    as_app: bool,
+    #[arg(long)]
     dry_run: bool,
 }
 
@@ -599,7 +607,17 @@ struct PullRequestReviewArgs {
     #[command(flatten)]
     content: BodyArgs,
     #[arg(long)]
+    as_app: bool,
+    #[arg(long)]
     dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct PullRequestUpdateBranchArgs {
+    #[command(flatten)]
+    target: TargetArgs,
+    #[arg(long)]
+    as_app: bool,
 }
 
 #[derive(Debug, Args)]
@@ -651,6 +669,7 @@ struct Capabilities {
     markdown: Markdown,
     output: Vec<&'static str>,
     attribution: Attribution,
+    modes: Modes,
 }
 
 #[derive(Debug, Serialize)]
@@ -659,6 +678,12 @@ struct Attribution {
     user: Vec<&'static str>,
     app: Vec<&'static str>,
     read_only: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Modes {
+    app_authored: Vec<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -893,6 +918,7 @@ fn run_pull_request(command: PullRequestCommand, json: bool) -> Result<()> {
                 head: args.head,
                 base: args.base,
                 draft: args.draft,
+                as_app: args.as_app,
             },
             args.dry_run,
             json,
@@ -904,6 +930,7 @@ fn run_pull_request(command: PullRequestCommand, json: bool) -> Result<()> {
                 title: args.title,
                 body: read_optional_body(&args.content)?,
                 base: args.base,
+                as_app: args.as_app,
             },
             args.dry_run,
             json,
@@ -914,7 +941,15 @@ fn run_pull_request(command: PullRequestCommand, json: bool) -> Result<()> {
             if !args.yes && !args.target.dry_run {
                 bail!("pull request merge requires --yes");
             }
-            execute_pull_request_target(args.target, json, "merge")
+            execute(
+                Request::PullRequestMerge {
+                    repository: args.target.repo,
+                    number: args.target.number,
+                    as_app: args.as_app,
+                },
+                args.target.dry_run,
+                json,
+            )
         }
         PullRequestCommand::Ready(args) => execute_pull_request_target(args, json, "ready"),
         PullRequestCommand::Draft(args) => execute_pull_request_target(args, json, "draft"),
@@ -924,6 +959,7 @@ fn run_pull_request(command: PullRequestCommand, json: bool) -> Result<()> {
                 number: args.number,
                 event: args.event,
                 body: read_optional_body(&args.content)?,
+                as_app: args.as_app,
             },
             args.dry_run,
             json,
@@ -957,9 +993,15 @@ fn run_pull_request(command: PullRequestCommand, json: bool) -> Result<()> {
             args.dry_run,
             json,
         ),
-        PullRequestCommand::UpdateBranch(args) => {
-            execute_pull_request_target(args, json, "update_branch")
-        }
+        PullRequestCommand::UpdateBranch(args) => execute(
+            Request::PullRequestUpdateBranch {
+                repository: args.target.repo,
+                number: args.target.number,
+                as_app: args.as_app,
+            },
+            args.target.dry_run,
+            json,
+        ),
     }
 }
 
@@ -973,19 +1015,11 @@ fn execute_pull_request_target(args: TargetArgs, json: bool, action: &str) -> Re
             repository: args.repo,
             number: args.number,
         },
-        "merge" => Request::PullRequestMerge {
-            repository: args.repo,
-            number: args.number,
-        },
         "ready" => Request::PullRequestReady {
             repository: args.repo,
             number: args.number,
         },
         "draft" => Request::PullRequestDraft {
-            repository: args.repo,
-            number: args.number,
-        },
-        "update_branch" => Request::PullRequestUpdateBranch {
             repository: args.repo,
             number: args.number,
         },
@@ -1004,6 +1038,7 @@ fn run_commit(command: CommitCommand, json: bool) -> Result<()> {
                     branch: args.branch,
                     message: read_message(&args.content)?,
                     files,
+                    as_app: args.as_app,
                 },
                 args.dry_run,
                 json,
@@ -1449,6 +1484,11 @@ fn emit_capabilities(json: bool) -> Result<()> {
             "read only: {}",
             capabilities.attribution.read_only.join(", ")
         )?;
+        writeln!(
+            stdout,
+            "app-authored mode: {}",
+            capabilities.modes.app_authored.join(", ")
+        )?;
         Ok(())
     }
 }
@@ -1506,51 +1546,74 @@ fn capabilities() -> Capabilities {
         media: media::supported_extensions(),
         markdown: markdown_capabilities(),
         output: vec!["text", "json"],
-        attribution: Attribution {
-            user: vec![
-                "pr.create",
-                "pr.edit",
-                "pr.close",
-                "pr.reopen",
-                "pr.merge",
-                "pr.ready",
-                "pr.draft",
-                "pr.review",
-                "pr.labels",
-                "pr.assignees",
-                "pr.react",
-                "pr.update-branch",
-            ],
-            app: vec![
-                "comment.create",
-                "comment.edit",
-                "comment.delete",
-                "comment.react",
-                "issue.create",
-                "issue.edit",
-                "issue.close",
-                "issue.reopen",
-                "issue.labels",
-                "issue.assignees",
-                "issue.react",
-                "commit.create",
-                "repository.dispatch",
-                "ref.create",
-                "ref.delete",
-                "tag.create",
-                "tag.delete",
-                "release.create",
-                "release.edit",
-                "release.delete",
-                "release.upload-asset",
-                "workflow.dispatch",
-                "workflow.cancel",
-                "workflow.rerun",
-                "workflow.enable",
-                "workflow.disable",
-            ],
-            read_only: vec!["workflow.status", "workflow.watch", "workflow.logs"],
-        },
+        attribution: attribution_capabilities(),
+        modes: mode_capabilities(),
+    }
+}
+
+fn attribution_capabilities() -> Attribution {
+    Attribution {
+        user: vec![
+            "pr.create",
+            "pr.edit",
+            "pr.close",
+            "pr.reopen",
+            "pr.merge",
+            "pr.ready",
+            "pr.draft",
+            "pr.review",
+            "pr.labels",
+            "pr.assignees",
+            "pr.react",
+            "pr.update-branch",
+        ],
+        app: vec![
+            "comment.create",
+            "comment.edit",
+            "comment.delete",
+            "comment.react",
+            "issue.create",
+            "issue.edit",
+            "issue.close",
+            "issue.reopen",
+            "issue.labels",
+            "issue.assignees",
+            "issue.react",
+            "pr.create",
+            "pr.edit",
+            "pr.merge",
+            "pr.review",
+            "pr.update-branch",
+            "commit.create",
+            "repository.dispatch",
+            "ref.create",
+            "ref.delete",
+            "tag.create",
+            "tag.delete",
+            "release.create",
+            "release.edit",
+            "release.delete",
+            "release.upload-asset",
+            "workflow.dispatch",
+            "workflow.cancel",
+            "workflow.rerun",
+            "workflow.enable",
+            "workflow.disable",
+        ],
+        read_only: vec!["workflow.status", "workflow.watch", "workflow.logs"],
+    }
+}
+
+fn mode_capabilities() -> Modes {
+    Modes {
+        app_authored: vec![
+            "commit.create",
+            "pr.create",
+            "pr.edit",
+            "pr.merge",
+            "pr.review",
+            "pr.update-branch",
+        ],
     }
 }
 

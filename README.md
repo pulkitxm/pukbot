@@ -6,7 +6,7 @@
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Pukbot is an agent-first Rust CLI for typed GitHub operations through the
-Pukbot GitHub App.
+Pukbot GitHub App!
 
 Comment, issue, commit, repository dispatch, and workflow operations run
 through the App. The CLI never receives the GitHub App private key or an

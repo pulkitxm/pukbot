@@ -24,8 +24,9 @@ Install the public GitHub App on the repositories where comments may be posted:
 [Install Pukbot on GitHub](https://github.com/apps/pukbot)
 
 Grant access only to the repositories that need Pukbot. The App requests issue,
-repository content, and Actions write access so the protected workflow can
-post comments, create commits, and dispatch workflows.
+repository content, Actions, and deployment write access so the protected
+workflow can post comments, create commits, dispatch workflows, and manage
+deployments.
 
 Linux and macOS:
 

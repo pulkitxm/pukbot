@@ -20,8 +20,8 @@ use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use clap_complete::Shell;
 use model::{
-    CommentDocument, LockReason, MAX_BODY_BYTES, Reaction, ReleaseLatest, Repository, Request,
-    ReviewEvent,
+    CommentDocument, DeploymentState, LockReason, MAX_BODY_BYTES, Reaction, ReleaseLatest,
+    Repository, Request, ReviewEvent,
 };
 use serde::Serialize;
 
@@ -98,6 +98,10 @@ enum Commands {
     Release {
         #[command(subcommand)]
         command: ReleaseCommand,
+    },
+    Deployment {
+        #[command(subcommand)]
+        command: DeploymentCommand,
     },
     Workflow {
         #[command(subcommand)]
@@ -207,6 +211,12 @@ enum ReleaseCommand {
     Edit(ReleaseEditArgs),
     Delete(ReleaseDeleteArgs),
     UploadAsset(ReleaseAssetUploadArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum DeploymentCommand {
+    Create(DeploymentCreateArgs),
+    Status(DeploymentStatusArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -537,6 +547,62 @@ struct ReleaseAssetUploadArgs {
 }
 
 #[derive(Debug, Args)]
+struct DeploymentCreateArgs {
+    #[arg(value_name = "REF")]
+    reference: String,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    environment: String,
+    #[arg(long)]
+    task: Option<String>,
+    #[arg(long)]
+    description: Option<String>,
+    #[arg(long, value_name = "JSON", conflicts_with = "payload_file")]
+    payload: Option<String>,
+    #[arg(long, value_name = "FILE", conflicts_with = "payload")]
+    payload_file: Option<PathBuf>,
+    #[arg(long = "required-context")]
+    required_contexts: Vec<String>,
+    #[command(flatten)]
+    flags: DeploymentCreateFlags,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct DeploymentCreateFlags {
+    #[arg(long)]
+    auto_merge: bool,
+    #[arg(long)]
+    transient_environment: bool,
+    #[arg(long)]
+    production_environment: bool,
+}
+
+#[derive(Debug, Args)]
+struct DeploymentStatusArgs {
+    #[arg(value_name = "DEPLOYMENT_ID")]
+    deployment_id: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long, value_enum)]
+    state: DeploymentState,
+    #[arg(long)]
+    target_url: Option<String>,
+    #[arg(long)]
+    log_url: Option<String>,
+    #[arg(long)]
+    environment_url: Option<String>,
+    #[arg(long)]
+    description: Option<String>,
+    #[arg(long)]
+    auto_inactive: bool,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
 struct WorkflowRunArgs {
     #[arg(value_name = "RUN_ID")]
     run_id: NonZeroU64,
@@ -795,6 +861,7 @@ fn run() -> Result<()> {
         Commands::Ref { command } => run_git_ref(command, cli.json),
         Commands::Tag { command } => run_tag(command, cli.json),
         Commands::Release { command } => run_release(command, cli.json),
+        Commands::Deployment { command } => run_deployment(command, cli.json),
         Commands::Workflow { command } => run_workflow(command, cli.json),
         Commands::Completions(args) => run_completions(args, cli.json),
         Commands::Man(args) => run_manual(args, cli.json),
@@ -1319,6 +1386,45 @@ fn run_release(command: ReleaseCommand, json: bool) -> Result<()> {
     }
 }
 
+fn run_deployment(command: DeploymentCommand, json: bool) -> Result<()> {
+    match command {
+        DeploymentCommand::Create(args) => execute(
+            Request::DeploymentCreate {
+                repository: args.repo,
+                reference: args.reference,
+                environment: args.environment,
+                task: args.task,
+                description: args.description,
+                payload: read_object_payload(
+                    args.payload.as_deref(),
+                    args.payload_file.as_deref(),
+                    "deployment payload",
+                )?,
+                auto_merge: args.flags.auto_merge,
+                required_contexts: args.required_contexts,
+                transient_environment: args.flags.transient_environment,
+                production_environment: args.flags.production_environment,
+            },
+            args.dry_run,
+            json,
+        ),
+        DeploymentCommand::Status(args) => execute(
+            Request::DeploymentStatus {
+                repository: args.repo,
+                deployment_id: args.deployment_id,
+                state: args.state,
+                target_url: args.target_url,
+                log_url: args.log_url,
+                environment_url: args.environment_url,
+                description: args.description,
+                auto_inactive: args.auto_inactive,
+            },
+            args.dry_run,
+            json,
+        ),
+    }
+}
+
 fn run_workflow(command: WorkflowCommand, json: bool) -> Result<()> {
     match command {
         WorkflowCommand::Dispatch(args) => {
@@ -1432,6 +1538,14 @@ fn read_client_payload(
     inline: Option<&str>,
     path: Option<&Path>,
 ) -> Result<BTreeMap<String, serde_json::Value>> {
+    read_object_payload(inline, path, "client payload")
+}
+
+fn read_object_payload(
+    inline: Option<&str>,
+    path: Option<&Path>,
+    name: &str,
+) -> Result<BTreeMap<String, serde_json::Value>> {
     let contents = if let Some(inline) = inline {
         inline.to_owned()
     } else if let Some(path) = path {
@@ -1439,7 +1553,7 @@ fn read_client_payload(
     } else {
         "{}".to_owned()
     };
-    serde_json::from_str(&contents).context("client payload must be a JSON object")
+    serde_json::from_str(&contents).with_context(|| format!("{name} must be a JSON object"))
 }
 
 fn parse_workflow_inputs(values: &[String]) -> Result<BTreeMap<String, String>> {
@@ -1669,6 +1783,8 @@ fn capabilities() -> Capabilities {
             "release.edit",
             "release.delete",
             "release.upload-asset",
+            "deployment.create",
+            "deployment.status",
             "workflow.dispatch",
             "workflow.cancel",
             "workflow.rerun",
@@ -1735,6 +1851,8 @@ fn attribution_capabilities() -> Attribution {
             "release.edit",
             "release.delete",
             "release.upload-asset",
+            "deployment.create",
+            "deployment.status",
             "workflow.dispatch",
             "workflow.cancel",
             "workflow.rerun",

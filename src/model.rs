@@ -20,6 +20,7 @@ pub const MAX_WORKFLOW_INPUT_PAYLOAD_CHARS: usize = 65_535;
 pub const MAX_REPOSITORY_DISPATCH_PROPERTIES: usize = 10;
 pub const MAX_REPOSITORY_DISPATCH_PAYLOAD_CHARS: usize = 65_535;
 pub const MAX_RELEASE_ASSET_BYTES: usize = 40_000;
+pub const MAX_DEPLOYMENT_PAYLOAD_CHARS: usize = 65_535;
 pub const MAX_WIKI_DELETE_PATHS: usize = 500;
 pub const MAX_BATCH_TARGETS: usize = 50;
 
@@ -112,6 +113,18 @@ pub enum ReleaseLatest {
     True,
     False,
     Legacy,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum DeploymentState {
+    Error,
+    Failure,
+    Inactive,
+    InProgress,
+    Queued,
+    Pending,
+    Success,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, ValueEnum)]
@@ -419,6 +432,35 @@ pub enum Request {
         label: Option<String>,
         content_type: String,
         content_base64: String,
+    },
+    DeploymentCreate {
+        repository: Repository,
+        #[serde(rename = "ref")]
+        reference: String,
+        environment: String,
+        task: Option<String>,
+        description: Option<String>,
+        #[serde(default)]
+        payload: BTreeMap<String, serde_json::Value>,
+        #[serde(default)]
+        auto_merge: bool,
+        #[serde(default)]
+        required_contexts: Vec<String>,
+        #[serde(default)]
+        transient_environment: bool,
+        #[serde(default)]
+        production_environment: bool,
+    },
+    DeploymentStatus {
+        repository: Repository,
+        deployment_id: NonZeroU64,
+        state: DeploymentState,
+        target_url: Option<String>,
+        log_url: Option<String>,
+        environment_url: Option<String>,
+        description: Option<String>,
+        #[serde(default)]
+        auto_inactive: bool,
     },
     WorkflowDispatch {
         repository: Repository,
@@ -959,6 +1001,64 @@ impl Request {
                     content_base64,
                 })
             }
+            Self::DeploymentCreate {
+                repository,
+                reference,
+                environment,
+                task,
+                description,
+                payload,
+                auto_merge,
+                required_contexts,
+                transient_environment,
+                production_environment,
+            } => {
+                validate_branch(&reference)?;
+                validate_deployment_environment(&environment)?;
+                validate_optional_deployment_text(task.as_deref(), "task", 255)?;
+                validate_optional_deployment_text(description.as_deref(), "description", 512)?;
+                validate_deployment_payload(&payload)?;
+                validate_deployment_contexts(&required_contexts)?;
+                Ok(Operation::DeploymentCreate {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    reference,
+                    environment,
+                    task,
+                    description,
+                    payload,
+                    auto_merge,
+                    required_contexts,
+                    transient_environment,
+                    production_environment,
+                })
+            }
+            Self::DeploymentStatus {
+                repository,
+                deployment_id,
+                state,
+                target_url,
+                log_url,
+                environment_url,
+                description,
+                auto_inactive,
+            } => {
+                validate_optional_url(target_url.as_deref(), "target URL")?;
+                validate_optional_url(log_url.as_deref(), "log URL")?;
+                validate_optional_url(environment_url.as_deref(), "environment URL")?;
+                validate_optional_deployment_text(description.as_deref(), "description", 512)?;
+                Ok(Operation::DeploymentStatus {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    deployment_id,
+                    state,
+                    target_url,
+                    log_url,
+                    environment_url,
+                    description,
+                    auto_inactive,
+                })
+            }
             Self::WorkflowDispatch {
                 repository,
                 workflow,
@@ -1285,6 +1385,31 @@ pub enum Operation {
         content_type: String,
         content_base64: String,
     },
+    DeploymentCreate {
+        owner: String,
+        repository: String,
+        #[serde(rename = "ref")]
+        reference: String,
+        environment: String,
+        task: Option<String>,
+        description: Option<String>,
+        payload: BTreeMap<String, serde_json::Value>,
+        auto_merge: bool,
+        required_contexts: Vec<String>,
+        transient_environment: bool,
+        production_environment: bool,
+    },
+    DeploymentStatus {
+        owner: String,
+        repository: String,
+        deployment_id: NonZeroU64,
+        state: DeploymentState,
+        target_url: Option<String>,
+        log_url: Option<String>,
+        environment_url: Option<String>,
+        description: Option<String>,
+        auto_inactive: bool,
+    },
     WorkflowDispatch {
         owner: String,
         repository: String,
@@ -1355,6 +1480,8 @@ impl Operation {
             Self::ReleaseEdit { .. } => "release_edit",
             Self::ReleaseDelete { .. } => "release_delete",
             Self::ReleaseAssetUpload { .. } => "release_asset_upload",
+            Self::DeploymentCreate { .. } => "deployment_create",
+            Self::DeploymentStatus { .. } => "deployment_status",
             Self::WorkflowDispatch { .. } => "workflow_dispatch",
             Self::WorkflowCancel { .. } => "workflow_cancel",
             Self::WorkflowRerun { .. } => "workflow_rerun",
@@ -1703,6 +1830,58 @@ fn validate_release_asset(
         .context("release asset content must be valid base64")?;
     if content.is_empty() || content.len() > MAX_RELEASE_ASSET_BYTES {
         bail!("release asset must be between 1 and {MAX_RELEASE_ASSET_BYTES} bytes");
+    }
+    Ok(())
+}
+
+fn validate_deployment_environment(environment: &str) -> Result<()> {
+    if environment.trim().is_empty()
+        || environment.len() > 255
+        || environment.chars().any(char::is_control)
+    {
+        bail!("deployment environment must be between 1 and 255 bytes without controls");
+    }
+    Ok(())
+}
+
+fn validate_optional_deployment_text(
+    value: Option<&str>,
+    name: &str,
+    maximum: usize,
+) -> Result<()> {
+    if let Some(value) = value {
+        if value.trim().is_empty() || value.len() > maximum || value.chars().any(char::is_control) {
+            bail!("deployment {name} must be between 1 and {maximum} bytes without controls");
+        }
+    }
+    Ok(())
+}
+
+fn validate_deployment_payload(payload: &BTreeMap<String, serde_json::Value>) -> Result<()> {
+    let payload_chars = serde_json::to_string(payload)?.chars().count();
+    if payload_chars > MAX_DEPLOYMENT_PAYLOAD_CHARS {
+        bail!("deployment payload exceeds {MAX_DEPLOYMENT_PAYLOAD_CHARS} characters when encoded");
+    }
+    Ok(())
+}
+
+fn validate_deployment_contexts(contexts: &[String]) -> Result<()> {
+    validate_values(contexts, "deployment context")?;
+    let unique = contexts.iter().collect::<HashSet<_>>();
+    if unique.len() != contexts.len() {
+        bail!("deployment contexts must be unique");
+    }
+    Ok(())
+}
+
+fn validate_optional_url(value: Option<&str>, name: &str) -> Result<()> {
+    if let Some(value) = value {
+        if value.len() > 2048
+            || !(value.starts_with("https://") || value.starts_with("http://"))
+            || value.chars().any(char::is_control)
+        {
+            bail!("deployment {name} must be an HTTP or HTTPS URL up to 2048 bytes");
+        }
     }
     Ok(())
 }
@@ -2061,6 +2240,8 @@ mod tests {
             r#"{"operation":"release_edit","repository":"owner/repo","release_id":1,"name":"Release 1.2.3","draft":false,"make_latest":"true"}"#,
             r#"{"operation":"release_delete","repository":"owner/repo","release_id":1}"#,
             r#"{"operation":"release_asset_upload","repository":"owner/repo","release_id":1,"name":"checksums.txt","label":"checksums","content_type":"text/plain","content_base64":"aGVsbG8="}"#,
+            r#"{"operation":"deployment_create","repository":"owner/repo","ref":"main","environment":"staging","payload":{"version":"1.2.3"},"required_contexts":[]}"#,
+            r#"{"operation":"deployment_status","repository":"owner/repo","deployment_id":1,"state":"success","environment_url":"https://example.com"}"#,
             r#"{"operation":"workflow_dispatch","repository":"owner/repo","workflow":"release.yml","ref":"main","inputs":{"release":"true"}}"#,
             r#"{"operation":"workflow_cancel","repository":"owner/repo","run_id":1}"#,
             r#"{"operation":"workflow_rerun","repository":"owner/repo","run_id":1,"failed_only":true}"#,
@@ -2384,6 +2565,89 @@ mod tests {
             "name": "asset.bin",
             "content_type": "application/octet-stream",
             "content_base64": content_base64
+        });
+        let request = serde_json::from_value::<Request>(document).expect("request should parse");
+        assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn serializes_deployment_contracts() {
+        let documents = [
+            (
+                r#"{"operation":"deployment_create","repository":"owner/repo","ref":"main","environment":"staging","task":"deploy","description":"staging deploy","payload":{"version":"1.2.3"},"auto_merge":false,"required_contexts":["ci"],"transient_environment":true,"production_environment":false}"#,
+                serde_json::json!({
+                    "operation": "deployment_create",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "ref": "main",
+                    "environment": "staging",
+                    "task": "deploy",
+                    "description": "staging deploy",
+                    "payload": {"version": "1.2.3"},
+                    "auto_merge": false,
+                    "required_contexts": ["ci"],
+                    "transient_environment": true,
+                    "production_environment": false
+                }),
+            ),
+            (
+                r#"{"operation":"deployment_status","repository":"owner/repo","deployment_id":42,"state":"in_progress","target_url":"https://example.com/target","log_url":"https://example.com/logs","environment_url":"https://example.com","description":"deploying","auto_inactive":true}"#,
+                serde_json::json!({
+                    "operation": "deployment_status",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "deployment_id": 42,
+                    "state": "in_progress",
+                    "target_url": "https://example.com/target",
+                    "log_url": "https://example.com/logs",
+                    "environment_url": "https://example.com",
+                    "description": "deploying",
+                    "auto_inactive": true
+                }),
+            ),
+        ];
+
+        for (document, expected) in documents {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            let operation = request.prepare(true).expect("request should prepare");
+            assert_eq!(
+                serde_json::to_value(operation).expect("operation should serialize"),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_deployment_requests() {
+        let documents = [
+            r#"{"operation":"deployment_create","repository":"owner/repo","ref":"../main","environment":"staging"}"#,
+            r#"{"operation":"deployment_create","repository":"owner/repo","ref":"main","environment":""}"#,
+            r#"{"operation":"deployment_create","repository":"owner/repo","ref":"main","environment":"staging","required_contexts":["ci","ci"]}"#,
+            r#"{"operation":"deployment_status","repository":"owner/repo","deployment_id":1,"state":"success","log_url":"file:///tmp/log"}"#,
+            r#"{"operation":"deployment_status","repository":"owner/repo","deployment_id":1,"state":"unknown"}"#,
+        ];
+
+        for document in documents {
+            let request = serde_json::from_str::<Request>(document);
+            assert!(
+                request.is_err()
+                    || request
+                        .expect("request should parse")
+                        .prepare(true)
+                        .is_err(),
+                "{document}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_deployment_payload() {
+        let document = serde_json::json!({
+            "operation": "deployment_create",
+            "repository": "owner/repo",
+            "ref": "main",
+            "environment": "staging",
+            "payload": {"value": "x".repeat(65_536)}
         });
         let request = serde_json::from_value::<Request>(document).expect("request should parse");
         assert!(request.prepare(true).is_err());

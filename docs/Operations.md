@@ -518,11 +518,50 @@ Assets must be between 1 and 40,000 bytes so the complete operation remains
 within GitHub's workflow input limit. The JSON field is `content_base64`.
 Pukbot returns the release URL or uploaded asset download URL.
 
+## Deployments
+
+```bash
+pukbot deployment create main \
+  --repo owner/repository \
+  --environment staging \
+  --description "staging deployment" \
+  --payload '{"version":"1.2.3"}' \
+  --required-context ci
+
+pukbot deployment status 123 \
+  --repo owner/repository \
+  --state in-progress \
+  --log-url https://example.com/deployments/123/logs
+
+pukbot deployment status 123 \
+  --repo owner/repository \
+  --state success \
+  --environment-url https://staging.example.com \
+  --auto-inactive
+```
+
+Deployment creation accepts a branch, tag, or commit ref, an environment, an
+optional task and description, a JSON object from `--payload` or
+`--payload-file`, repeated `--required-context` values, and the
+`--auto-merge`, `--transient-environment`, and `--production-environment`
+flags. Pukbot validates refs, unique contexts, and the 65,535-character payload
+limit before dispatch.
+
+Deployment status states are `error`, `failure`, `inactive`, `in-progress`,
+`queued`, `pending`, and `success`. Statuses can include target, log, and
+environment URLs, a description, and `--auto-inactive`. The matching JSON
+values use `in_progress` and the typed operations are `deployment_create` and
+`deployment_status`.
+
+Workflow output reports the created deployment or status ID and its API URL,
+then returns the repository deployment list as `resourceUrl`. The operation
+workflow URL remains available for complete status and logs.
+
 ## Permissions
 
 The protected operation workflow requests only the permissions required for
-each operation. Workflow dispatch and controls use Actions write access.
-Other App operations use issue, pull request, or repository content write
-access. The App installation must include the target repository and grant the
-required permission. The CLI never receives the App private key or its
-short-lived installation token.
+each operation. Workflow dispatch and controls use Actions write access, and
+deployment operations use Deployments write access. Other App operations use
+issue, pull request, or repository content write access. The App installation
+must include the target repository and grant the required permission. The CLI
+never receives the App private key or its short-lived installation token.

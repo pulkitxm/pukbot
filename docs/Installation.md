@@ -1,8 +1,9 @@
 # Installation
 
 Install the [Pukbot GitHub App](https://github.com/apps/pukbot) on the
-repositories where comments may be posted. Select only the repositories that
-need access.
+repositories where operations may run. Select only the repositories that need
+access, and approve Actions write permission when workflow dispatches are
+required.
 
 Linux and macOS:
 

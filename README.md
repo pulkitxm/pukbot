@@ -8,10 +8,10 @@
 Pukbot is an agent-first Rust CLI for typed GitHub operations through the
 Pukbot GitHub App.
 
-Comment, issue, and commit operations run through the App. The CLI never
-receives the GitHub App private key or an installation token. A protected
-GitHub Actions environment mints a short-lived, repository-scoped token,
-performs the operation, and discards the token.
+Comment, issue, commit, and workflow dispatch operations run through the App.
+The CLI never receives the GitHub App private key or an installation token. A
+protected GitHub Actions environment mints a short-lived, repository-scoped
+token, performs the operation, and discards the token.
 
 Pull request operations run through your own authenticated GitHub CLI session
 instead, so GitHub records you as the pull request author. See
@@ -23,9 +23,9 @@ Install the public GitHub App on the repositories where comments may be posted:
 
 [Install Pukbot on GitHub](https://github.com/apps/pukbot)
 
-Grant access only to the repositories that need Pukbot. The App requests
-issue and repository content write access so the protected workflow can post
-comments and create commits.
+Grant access only to the repositories that need Pukbot. The App requests issue,
+repository content, and Actions write access so the protected workflow can
+post comments, create commits, and dispatch workflows.
 
 Linux and macOS:
 
@@ -184,6 +184,18 @@ pukbot commit create --repo owner/repository --branch main --message "data: upda
 Only text content is supported today; staged binary files are rejected
 before dispatch.
 
+Dispatch a workflow as the Pukbot App and receive the created run URL:
+
+```bash
+pukbot workflow dispatch release.yml \
+  --repo owner/repository \
+  --ref main \
+  --input release=true
+```
+
+The target workflow must support `workflow_dispatch`. Repeat `--input` for
+each `KEY=VALUE` input, or omit it when the workflow has no inputs.
+
 See [Operations](docs/Operations.md) for the complete command and JSON
 contracts, and [Markdown](docs/Markdown.md) for the body rendering contract.
 
@@ -231,6 +243,7 @@ Authored by the Pukbot App, executed inside the protected workflow:
 
 - every `comment` and `issue` operation
 - `commit create`
+- `workflow dispatch`
 
 `commit create` records you as the commit author and the App as the committer,
 so the commit shows as authored by you and committed by Pukbot, and it counts

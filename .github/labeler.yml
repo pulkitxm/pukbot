@@ -12,4 +12,4 @@ installer:
       - any-glob-to-any-file: ['install.sh', 'install.ps1', 'tests/install.sh']
 security:
   - changed-files:
-      - any-glob-to-any-file: ['SECURITY.md', 'deny.toml', '.github/workflows/security.yml']
+      - any-glob-to-any-file: ['SECURITY.md', 'deny.toml']

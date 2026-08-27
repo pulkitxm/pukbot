@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::num::NonZeroU64;
 use std::str::FromStr;
@@ -14,6 +14,8 @@ pub const MAX_COMMIT_MESSAGE_BYTES: usize = 8_000;
 pub const MAX_COMMIT_FILE_BYTES: usize = 60_000;
 pub const MAX_COMMIT_TOTAL_BYTES: usize = 120_000;
 pub const MAX_COMMIT_FILES: usize = 50;
+pub const MAX_WORKFLOW_INPUTS: usize = 25;
+pub const MAX_WORKFLOW_INPUT_PAYLOAD_CHARS: usize = 65_535;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Repository {
@@ -267,6 +269,14 @@ pub enum Request {
         message: String,
         files: Vec<CommitFileDocument>,
     },
+    WorkflowDispatch {
+        repository: Repository,
+        workflow: String,
+        #[serde(rename = "ref")]
+        reference: String,
+        #[serde(default)]
+        inputs: BTreeMap<String, String>,
+    },
 }
 
 impl Request {
@@ -517,6 +527,23 @@ impl Request {
                     files: prepare_commit_files(files)?,
                 })
             }
+            Self::WorkflowDispatch {
+                repository,
+                workflow,
+                reference,
+                inputs,
+            } => {
+                validate_workflow(&workflow)?;
+                validate_branch(&reference)?;
+                validate_workflow_inputs(&inputs)?;
+                Ok(Operation::WorkflowDispatch {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    workflow,
+                    reference,
+                    inputs,
+                })
+            }
         }
     }
 }
@@ -677,6 +704,14 @@ pub enum Operation {
         message: String,
         files: Vec<CommitFile>,
     },
+    WorkflowDispatch {
+        owner: String,
+        repository: String,
+        workflow: String,
+        #[serde(rename = "ref")]
+        reference: String,
+        inputs: BTreeMap<String, String>,
+    },
 }
 
 impl Operation {
@@ -706,6 +741,7 @@ impl Operation {
             Self::PullRequestReact { .. } => "pull_request_react",
             Self::PullRequestUpdateBranch { .. } => "pull_request_update_branch",
             Self::CommitCreate { .. } => "commit_create",
+            Self::WorkflowDispatch { .. } => "workflow_dispatch",
         }
     }
 }
@@ -866,6 +902,38 @@ fn unclosed_code_fence(body: &str) -> Option<String> {
 fn validate_branch(branch: &str) -> Result<()> {
     if branch.trim().is_empty() || branch.len() > 255 || branch.contains(['\n', '\r']) {
         bail!("branch must be between 1 and 255 bytes without newlines");
+    }
+    Ok(())
+}
+
+fn validate_workflow(workflow: &str) -> Result<()> {
+    if workflow.is_empty()
+        || workflow.len() > 255
+        || workflow == "."
+        || workflow == ".."
+        || !workflow
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        bail!("workflow must be a numeric ID or workflow file name");
+    }
+    Ok(())
+}
+
+fn validate_workflow_inputs(inputs: &BTreeMap<String, String>) -> Result<()> {
+    if inputs.len() > MAX_WORKFLOW_INPUTS {
+        bail!("workflow dispatch supports at most {MAX_WORKFLOW_INPUTS} inputs");
+    }
+    for key in inputs.keys() {
+        if key.is_empty() || key.len() > 255 || key.chars().any(char::is_control) {
+            bail!(
+                "workflow input names must be between 1 and 255 bytes without control characters"
+            );
+        }
+    }
+    let payload_chars = serde_json::to_string(inputs)?.chars().count();
+    if payload_chars > MAX_WORKFLOW_INPUT_PAYLOAD_CHARS {
+        bail!("workflow inputs exceed {MAX_WORKFLOW_INPUT_PAYLOAD_CHARS} characters when encoded");
     }
     Ok(())
 }
@@ -1104,6 +1172,7 @@ mod tests {
             r#"{"operation":"pull_request_react","repository":"owner/repo","number":1,"reaction":"eyes"}"#,
             r#"{"operation":"pull_request_update_branch","repository":"owner/repo","number":1}"#,
             r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"data: update roster","files":[{"path":"data/members.json","content":"[]"},{"path":"data/old.json","delete":true}]}"#,
+            r#"{"operation":"workflow_dispatch","repository":"owner/repo","workflow":"release.yml","ref":"main","inputs":{"release":"true"}}"#,
         ];
 
         for document in documents {
@@ -1137,6 +1206,48 @@ mod tests {
             r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"m","files":[]}"#,
         )
         .expect("request should parse");
+        assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn serializes_workflow_dispatch_contract() {
+        let request = serde_json::from_str::<Request>(
+            r#"{"operation":"workflow_dispatch","repository":"owner/repo","workflow":"release.yml","ref":"main","inputs":{"release":"true"}}"#,
+        )
+        .expect("request should parse");
+        let operation = request.prepare(true).expect("request should prepare");
+        assert_eq!(
+            serde_json::to_value(operation).expect("operation should serialize"),
+            serde_json::json!({
+                "operation": "workflow_dispatch",
+                "owner": "owner",
+                "repository": "repo",
+                "workflow": "release.yml",
+                "ref": "main",
+                "inputs": {"release": "true"}
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_unsafe_workflow_identifier() {
+        let request = serde_json::from_str::<Request>(
+            r#"{"operation":"workflow_dispatch","repository":"owner/repo","workflow":"../release.yml","ref":"main"}"#,
+        )
+        .expect("request should parse");
+        assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn rejects_too_many_workflow_inputs() {
+        let inputs = (0..26)
+            .map(|index| format!(r#""input{index}":"value""#))
+            .collect::<Vec<_>>()
+            .join(",");
+        let document = format!(
+            r#"{{"operation":"workflow_dispatch","repository":"owner/repo","workflow":"release.yml","ref":"main","inputs":{{{inputs}}}}}"#
+        );
+        let request = serde_json::from_str::<Request>(&document).expect("request should parse");
         assert!(request.prepare(true).is_err());
     }
 }

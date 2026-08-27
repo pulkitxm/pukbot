@@ -222,6 +222,47 @@ message explicitly so GitHub does not add generated attribution trailers.
 Pull request descriptions and review bodies receive no disclosure footer. Task
 lists in a description feed the pull request task counter.
 
+## Batch issue and pull request mutations
+
+```bash
+pukbot issue batch 101 102 103 \
+  --repo owner/repository \
+  --comment "closing completed work" \
+  --add-label complete \
+  --remove-assignee octocat \
+  --close \
+  --lock \
+  --lock-reason resolved \
+  --yes
+
+pukbot pr batch 201 202 \
+  --repo owner/repository \
+  --add-label ready \
+  --add-assignee octocat \
+  --allow-partial \
+  --yes
+```
+
+Batch commands combine a comment, label additions and removals, assignee
+additions and removals, close, and lock into one typed operation for up to 50
+unique targets. Lock reasons are `off-topic`, `too-heated`, `resolved`, and
+`spam`. Execution requires `--yes`; `--dry-run` validates and prints the
+complete operation without confirmation.
+
+The JSON operations are `issue_batch` and `pull_request_batch`. They accept
+`numbers`, optional `comment`, `add_labels`, `remove_labels`,
+`add_assignees`, `remove_assignees`, `close`, `lock`,
+`lock_reason`, and `allow_partial`. At least one mutation is required.
+Duplicate targets and values, conflicting additions and removals, empty
+comments, and issue or pull request type mismatches are rejected.
+
+Every target emits its status, URL, and any failure reason in the workflow log,
+followed by a compact `pukbot-batch-result` JSON array and success and failure
+counts. The default fails the workflow after processing every target if any
+target failed. `--allow-partial` preserves the same per-target results while
+letting successful targets produce a successful workflow. Batch comments
+receive the normal Pukbot disclosure footer and requester line.
+
 ## Commits
 
 ```bash

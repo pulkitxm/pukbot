@@ -20,7 +20,8 @@ use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use clap_complete::Shell;
 use model::{
-    CommentDocument, MAX_BODY_BYTES, Reaction, ReleaseLatest, Repository, Request, ReviewEvent,
+    CommentDocument, LockReason, MAX_BODY_BYTES, Reaction, ReleaseLatest, Repository, Request,
+    ReviewEvent,
 };
 use serde::Serialize;
 
@@ -153,6 +154,7 @@ enum IssueCommand {
     Labels(ListEditArgs),
     Assignees(ListEditArgs),
     React(ReactArgs),
+    Batch(BatchMutationArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -169,6 +171,7 @@ enum PullRequestCommand {
     Assignees(ListEditArgs),
     React(ReactArgs),
     UpdateBranch(PullRequestUpdateBranchArgs),
+    Batch(BatchMutationArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -301,6 +304,50 @@ struct CommitCreateArgs {
     paths: Vec<PathBuf>,
     #[arg(long)]
     as_app: bool,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct BatchMutationArgs {
+    #[arg(required = true)]
+    numbers: Vec<NonZeroU64>,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long, conflicts_with = "comment_file")]
+    comment: Option<String>,
+    #[arg(long, value_name = "FILE", conflicts_with = "comment")]
+    comment_file: Option<PathBuf>,
+    #[arg(long = "add-label")]
+    add_labels: Vec<String>,
+    #[arg(long = "remove-label")]
+    remove_labels: Vec<String>,
+    #[arg(long = "add-assignee")]
+    add_assignees: Vec<String>,
+    #[arg(long = "remove-assignee")]
+    remove_assignees: Vec<String>,
+    #[command(flatten)]
+    actions: BatchActions,
+    #[arg(long, value_enum)]
+    lock_reason: Option<LockReason>,
+    #[command(flatten)]
+    execution: BatchExecutionArgs,
+}
+
+#[derive(Debug, Args)]
+struct BatchActions {
+    #[arg(long)]
+    close: bool,
+    #[arg(long)]
+    lock: bool,
+}
+
+#[derive(Debug, Args)]
+struct BatchExecutionArgs {
+    #[arg(long)]
+    allow_partial: bool,
+    #[arg(long)]
+    yes: bool,
     #[arg(long)]
     dry_run: bool,
 }
@@ -918,6 +965,7 @@ fn run_issue(command: IssueCommand, json: bool) -> Result<()> {
             args.dry_run,
             json,
         ),
+        IssueCommand::Batch(args) => execute_batch(args, json, false),
     }
 }
 
@@ -1030,7 +1078,45 @@ fn run_pull_request(command: PullRequestCommand, json: bool) -> Result<()> {
             args.target.dry_run,
             json,
         ),
+        PullRequestCommand::Batch(args) => execute_batch(args, json, true),
     }
+}
+
+fn execute_batch(args: BatchMutationArgs, json: bool, pull_request: bool) -> Result<()> {
+    if !args.execution.yes && !args.execution.dry_run {
+        bail!("batch operations require --yes");
+    }
+    let comment = read_optional_message(args.comment.as_deref(), args.comment_file.as_deref())?;
+    let request = if pull_request {
+        Request::PullRequestBatch {
+            repository: args.repo,
+            numbers: args.numbers,
+            comment,
+            add_labels: args.add_labels,
+            remove_labels: args.remove_labels,
+            add_assignees: args.add_assignees,
+            remove_assignees: args.remove_assignees,
+            close: args.actions.close,
+            lock: args.actions.lock,
+            lock_reason: args.lock_reason,
+            allow_partial: args.execution.allow_partial,
+        }
+    } else {
+        Request::IssueBatch {
+            repository: args.repo,
+            numbers: args.numbers,
+            comment,
+            add_labels: args.add_labels,
+            remove_labels: args.remove_labels,
+            add_assignees: args.add_assignees,
+            remove_assignees: args.remove_assignees,
+            close: args.actions.close,
+            lock: args.actions.lock,
+            lock_reason: args.lock_reason,
+            allow_partial: args.execution.allow_partial,
+        }
+    };
+    execute(request, args.execution.dry_run, json)
 }
 
 fn execute_pull_request_target(args: TargetArgs, json: bool, action: &str) -> Result<()> {
@@ -1554,6 +1640,7 @@ fn capabilities() -> Capabilities {
             "issue.labels",
             "issue.assignees",
             "issue.react",
+            "issue.batch",
             "pr.create",
             "pr.edit",
             "pr.close",
@@ -1566,6 +1653,7 @@ fn capabilities() -> Capabilities {
             "pr.assignees",
             "pr.react",
             "pr.update-branch",
+            "pr.batch",
             "commit.create",
             "wiki.publish",
             "repository.dispatch",
@@ -1625,11 +1713,13 @@ fn attribution_capabilities() -> Attribution {
             "issue.labels",
             "issue.assignees",
             "issue.react",
+            "issue.batch",
             "pr.create",
             "pr.edit",
             "pr.merge",
             "pr.review",
             "pr.update-branch",
+            "pr.batch",
             "commit.create",
             "wiki.publish",
             "repository.dispatch",

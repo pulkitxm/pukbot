@@ -91,6 +91,38 @@ jobs:
           git add Cargo.toml Cargo.lock
           git commit -m "chore: release v${VERSION}"
       - run: cargo package --locked
+      - name: Validate the release commit
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -euo pipefail
+          branch="release-candidate/v${VERSION}-${GITHUB_RUN_ID}"
+          cleanup() {
+            git push origin --delete "refs/heads/${branch}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          git push origin HEAD:"refs/heads/${branch}"
+          sha=$(git rev-parse HEAD)
+          for _ in $(seq 1 120); do
+            checks=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${sha}/check-runs?per_page=100")
+            ci=$(jq -r '[.check_runs[] | select(.name == "CI")] | last | .conclusion // "pending"' <<<"${checks}")
+            hygiene=$(jq -r '[.check_runs[] | select(.name == "Hygiene")] | last | .conclusion // "pending"' <<<"${checks}")
+            if [ "${ci}" = success ] && [ "${hygiene}" = success ]; then
+              cleanup
+              trap - EXIT
+              exit 0
+            fi
+            for conclusion in "${ci}" "${hygiene}"; do
+              case "${conclusion}" in
+                pending | null | '') ;;
+                *) echo "release commit check failed: ${conclusion}" >&2; exit 1 ;;
+              esac
+            done
+            sleep 15
+          done
+          echo "timed out waiting for release commit checks" >&2
+          exit 1
       - name: Publish the release commit and tag
         env:
           VERSION: ${{ steps.bump.outputs.version }}

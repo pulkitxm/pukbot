@@ -7,6 +7,7 @@ mod model;
 mod update;
 mod workflow;
 
+use std::collections::BTreeMap;
 use std::io::{self, IsTerminal, Read, Write};
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
@@ -71,6 +72,10 @@ enum Commands {
     Commit {
         #[command(subcommand)]
         command: CommitCommand,
+    },
+    Workflow {
+        #[command(subcommand)]
+        command: WorkflowCommand,
     },
     Completions(CompletionsArgs),
     Man(ManArgs),
@@ -144,6 +149,11 @@ enum PullRequestCommand {
 #[derive(Debug, Subcommand)]
 enum CommitCommand {
     Create(CommitCreateArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum WorkflowCommand {
+    Dispatch(WorkflowDispatchArgs),
 }
 
 #[derive(Debug, Args)]
@@ -227,6 +237,20 @@ struct CommitCreateArgs {
     content: MessageArgs,
     #[arg(value_name = "PATH")]
     paths: Vec<PathBuf>,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct WorkflowDispatchArgs {
+    #[arg(value_name = "WORKFLOW")]
+    workflow: String,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long = "ref", value_name = "BRANCH_OR_TAG")]
+    reference: String,
+    #[arg(long = "input", value_name = "KEY=VALUE")]
+    inputs: Vec<String>,
     #[arg(long)]
     dry_run: bool,
 }
@@ -402,6 +426,7 @@ fn run() -> Result<()> {
         Commands::Issue { command } => run_issue(command, cli.json),
         Commands::Pr { command } => run_pull_request(command, cli.json),
         Commands::Commit { command } => run_commit(command, cli.json),
+        Commands::Workflow { command } => run_workflow(command, cli.json),
         Commands::Completions(args) => run_completions(args, cli.json),
         Commands::Man(args) => run_manual(args, cli.json),
         Commands::Update(args) => run_update(args, cli.json),
@@ -720,6 +745,34 @@ fn run_commit(command: CommitCommand, json: bool) -> Result<()> {
     }
 }
 
+fn run_workflow(command: WorkflowCommand, json: bool) -> Result<()> {
+    match command {
+        WorkflowCommand::Dispatch(args) => execute(
+            Request::WorkflowDispatch {
+                repository: args.repo,
+                workflow: args.workflow,
+                reference: args.reference,
+                inputs: parse_workflow_inputs(&args.inputs)?,
+            },
+            args.dry_run,
+            json,
+        ),
+    }
+}
+
+fn parse_workflow_inputs(values: &[String]) -> Result<BTreeMap<String, String>> {
+    let mut inputs = BTreeMap::new();
+    for value in values {
+        let Some((key, value)) = value.split_once('=') else {
+            bail!("workflow inputs must use KEY=VALUE");
+        };
+        if inputs.insert(key.to_owned(), value.to_owned()).is_some() {
+            bail!("duplicate workflow input: {key}");
+        }
+    }
+    Ok(inputs)
+}
+
 fn execute(request: Request, dry_run: bool, json: bool) -> Result<()> {
     let operation = request.prepare(dry_run)?;
     if dry_run {
@@ -859,6 +912,7 @@ fn emit_capabilities(json: bool) -> Result<()> {
             "pr.react",
             "pr.update-branch",
             "commit.create",
+            "workflow.dispatch",
             "completions",
             "man",
             "update",
@@ -894,6 +948,7 @@ fn emit_capabilities(json: bool) -> Result<()> {
                 "issue.assignees",
                 "issue.react",
                 "commit.create",
+                "workflow.dispatch",
             ],
         },
     };
@@ -967,5 +1022,30 @@ fn markdown_capabilities() -> Markdown {
             "html-comments",
             "escapes",
         ],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_workflow_inputs;
+
+    #[test]
+    fn parses_workflow_inputs_at_first_equals_sign() {
+        let values = vec!["release=true".to_owned(), "message=a=b".to_owned()];
+        let inputs = parse_workflow_inputs(&values).expect("workflow inputs should parse");
+        assert_eq!(inputs.get("release").map(String::as_str), Some("true"));
+        assert_eq!(inputs.get("message").map(String::as_str), Some("a=b"));
+    }
+
+    #[test]
+    fn rejects_duplicate_workflow_inputs() {
+        let values = vec!["release=true".to_owned(), "release=false".to_owned()];
+        assert!(parse_workflow_inputs(&values).is_err());
+    }
+
+    #[test]
+    fn rejects_workflow_input_without_equals_sign() {
+        let values = vec!["release".to_owned()];
+        assert!(parse_workflow_inputs(&values).is_err());
     }
 }

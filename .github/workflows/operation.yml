@@ -31,6 +31,7 @@ jobs:
     environment: pukbot-production
     steps:
       - id: app-token
+        if: fromJSON(inputs.payload).operation != 'workflow_dispatch'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.PUKBOT_CLIENT_ID }}
@@ -40,10 +41,19 @@ jobs:
           permission-contents: write
           permission-issues: write
           permission-pull-requests: write
+      - id: workflow-token
+        if: fromJSON(inputs.payload).operation == 'workflow_dispatch'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.PUKBOT_CLIENT_ID }}
+          private-key: ${{ secrets.PUKBOT_PRIVATE_KEY }}
+          owner: ${{ fromJSON(inputs.payload).owner }}
+          repositories: ${{ fromJSON(inputs.payload).repository }}
+          permission-actions: write
       - name: Execute typed operation
         env:
           ACTOR: ${{ github.actor }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || steps.workflow-token.outputs.token }}
           PAYLOAD: ${{ inputs.payload }}
           REQUESTER: ${{ inputs.requester }}
           REQUEST_ID: ${{ inputs.request_id }}
@@ -189,6 +199,18 @@ jobs:
                 gh api --method POST "repos/${slug}/git/commits" --input - --jq .sha)
               gh api --method PATCH "repos/${slug}/git/refs/heads/${branch}" -f sha="${commit_sha}" -F force=false >/dev/null
               result="https://github.com/${slug}/commit/${commit_sha}"
+              ;;
+            workflow_dispatch)
+              workflow=$(jq -er \
+                '.workflow | select(test("^[A-Za-z0-9_.-]{1,255}$") and . != "." and . != "..")' \
+                payload.json)
+              encoded_workflow=$(jq -rn --arg value "${workflow}" '$value | @uri')
+              jq '{ref, inputs}' payload.json >request.json
+              result=$(gh api --method POST \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2026-03-10' \
+                "repos/${slug}/actions/workflows/${encoded_workflow}/dispatches" \
+                --input request.json --jq .html_url)
               ;;
             *)
               printf 'unsupported operation: %s\n' "${operation}" >&2

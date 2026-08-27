@@ -239,14 +239,44 @@ from the CLI or your local git config. The branch ref update is never forced:
 if the branch has moved since the commit was built, the operation fails
 instead of overwriting the newer history.
 
-## Workflow dispatches
+## Repository dispatches
+
+```bash
+pukbot repository dispatch apt-release \
+  --repo owner/repository \
+  --client-payload '{"version":"1.2.3","channel":"stable"}'
+```
+
+Use `--client-payload-file` for a JSON object stored in a file. The payload is
+optional and defaults to an empty object. The JSON operation is
+`repository_dispatch`:
+
+```json
+{
+  "operation": "repository_dispatch",
+  "repository": "owner/repository",
+  "event_type": "apt-release",
+  "client_payload": {
+    "version": "1.2.3",
+    "channel": "stable"
+  }
+}
+```
+
+Event types are 1 to 100 bytes. GitHub accepts at most 10 top-level payload
+properties and 65,535 encoded characters. Pukbot enforces these limits before
+dispatch. The receiving workflow must declare a matching
+`repository_dispatch` event type.
+
+## Workflow operations
 
 ```bash
 pukbot workflow dispatch release.yml \
   --repo owner/repository \
   --ref main \
   --input release=true \
-  --input channel=stable
+  --input channel=stable \
+  --watch
 ```
 
 The workflow argument is a numeric workflow ID or workflow file name. The
@@ -273,6 +303,47 @@ The JSON operation is `workflow_dispatch`:
 Inputs are optional. GitHub accepts at most 25 inputs with a combined encoded
 payload of 65,535 characters. Pukbot enforces both limits before dispatch.
 
+Use `--watch` to follow the target run after dispatch. Pukbot reports workflow
+and job state changes, prints final job URLs and conclusions, identifies the
+actor and triggering actor, prints failed logs, and returns a failing exit code
+for an unsuccessful target run. `--interval` accepts 1 to 60 seconds and
+defaults to 3.
+
+Control existing workflow runs and workflows:
+
+```bash
+pukbot workflow cancel 123 --repo owner/repository
+pukbot workflow rerun 123 --repo owner/repository
+pukbot workflow rerun 123 --repo owner/repository --failed-only
+pukbot workflow enable ci.yml --repo owner/repository
+pukbot workflow disable ci.yml --repo owner/repository
+```
+
+The typed operations are `workflow_cancel`, `workflow_rerun`,
+`workflow_enable`, and `workflow_disable`. Run IDs start at 1. Rerun accepts
+the optional Boolean `failed_only`. Enable and disable accept a numeric
+workflow ID or workflow file name.
+
+Workflow inspection is read-only and does not dispatch a Pukbot operation:
+
+```bash
+pukbot workflow status 123 --repo owner/repository
+pukbot workflow watch 123 --repo owner/repository --interval 5
+pukbot workflow logs 123 --repo owner/repository
+pukbot workflow logs 123 --repo owner/repository --failed
+```
+
+`status` returns the run, actor identities, jobs, steps, conclusions, and URLs.
+`watch` emits only state changes while a run is active and then prints the
+final summary. `logs` prints all logs, or only failed job logs with `--failed`.
+Global `--json` produces structured output and suppresses streaming progress.
+
+The Pukbot App can be the actor and triggering actor for dispatches and can
+perform mutations under its installation token. It cannot replace GitHub's
+internal Actions identity. Jobs still run on GitHub Actions infrastructure,
+and steps using the automatic `GITHUB_TOKEN` remain attributable to
+`github-actions[bot]`.
+
 ## Attribution
 
 Results report who GitHub records as the actor:
@@ -288,9 +359,9 @@ Results report who GitHub records as the actor:
 
 `authoredBy` is `user` for every `pr` operation, which executes locally under
 the authenticated GitHub CLI session. It is `pukbot` for every `comment`,
-`issue`, `commit`, and workflow dispatch operation, which executes inside the
-protected workflow under a short-lived App installation token; those results
-also carry a `workflowUrl`.
+`issue`, `commit`, repository dispatch, and workflow mutation, which executes
+inside the protected workflow under a short-lived App installation token;
+those results also carry a `workflowUrl`.
 
 `pukbot capabilities --json` reports the same split under `attribution`.
 
@@ -306,8 +377,8 @@ those with local git for now.
 ## Permissions
 
 The protected operation workflow requests only the permissions required for
-each operation. Workflow dispatch uses Actions write access. Other App
-operations use issue, pull request, or repository content write access. The
-App installation must include the target repository and grant the required
-permission. The CLI never receives the App private key or its short-lived
-installation token.
+each operation. Workflow dispatch and controls use Actions write access.
+Other App operations use issue, pull request, or repository content write
+access. The App installation must include the target repository and grant the
+required permission. The CLI never receives the App private key or its
+short-lived installation token.

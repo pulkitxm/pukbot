@@ -8,10 +8,10 @@
 Pukbot is an agent-first Rust CLI for typed GitHub operations through the
 Pukbot GitHub App.
 
-Comment, issue, commit, and workflow dispatch operations run through the App.
-The CLI never receives the GitHub App private key or an installation token. A
-protected GitHub Actions environment mints a short-lived, repository-scoped
-token, performs the operation, and discards the token.
+Comment, issue, commit, repository dispatch, and workflow operations run
+through the App. The CLI never receives the GitHub App private key or an
+installation token. A protected GitHub Actions environment mints a short-lived,
+repository-scoped token, performs the operation, and discards the token.
 
 Pull request operations run through your own authenticated GitHub CLI session
 instead, so GitHub records you as the pull request author. See
@@ -190,11 +190,31 @@ Dispatch a workflow as the Pukbot App and receive the created run URL:
 pukbot workflow dispatch release.yml \
   --repo owner/repository \
   --ref main \
-  --input release=true
+  --input release=true \
+  --watch
 ```
 
 The target workflow must support `workflow_dispatch`. Repeat `--input` for
-each `KEY=VALUE` input, or omit it when the workflow has no inputs.
+each `KEY=VALUE` input, or omit it when the workflow has no inputs. `--watch`
+reports workflow and job state changes, prints the final job summary, includes
+actor identities, shows failed logs, and returns a failing exit code when the
+target workflow fails.
+
+Inspect any run or read its logs later:
+
+```bash
+pukbot workflow status 123 --repo owner/repository
+pukbot workflow watch 123 --repo owner/repository
+pukbot workflow logs 123 --repo owner/repository --failed
+```
+
+Send a repository dispatch with an optional JSON payload:
+
+```bash
+pukbot repository dispatch apt-release \
+  --repo owner/repository \
+  --client-payload '{"version":"1.2.3"}'
+```
 
 See [Operations](docs/Operations.md) for the complete command and JSON
 contracts, and [Markdown](docs/Markdown.md) for the body rendering contract.
@@ -243,7 +263,13 @@ Authored by the Pukbot App, executed inside the protected workflow:
 
 - every `comment` and `issue` operation
 - `commit create`
-- `workflow dispatch`
+- `repository dispatch`
+- workflow dispatch, cancel, rerun, enable, and disable
+
+Pukbot can replace the actor that requests a workflow run or performs a GitHub
+mutation. It cannot replace GitHub's internal Actions identity. Workflow jobs
+still execute as GitHub Actions, and steps using the automatic `GITHUB_TOKEN`
+remain attributable to `github-actions[bot]`.
 
 `commit create` records you as the commit author and the App as the committer,
 so the commit shows as authored by you and committed by Pukbot, and it counts

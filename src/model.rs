@@ -16,6 +16,8 @@ pub const MAX_COMMIT_TOTAL_BYTES: usize = 120_000;
 pub const MAX_COMMIT_FILES: usize = 50;
 pub const MAX_WORKFLOW_INPUTS: usize = 25;
 pub const MAX_WORKFLOW_INPUT_PAYLOAD_CHARS: usize = 65_535;
+pub const MAX_REPOSITORY_DISPATCH_PROPERTIES: usize = 10;
+pub const MAX_REPOSITORY_DISPATCH_PAYLOAD_CHARS: usize = 65_535;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Repository {
@@ -269,6 +271,12 @@ pub enum Request {
         message: String,
         files: Vec<CommitFileDocument>,
     },
+    RepositoryDispatch {
+        repository: Repository,
+        event_type: String,
+        #[serde(default)]
+        client_payload: BTreeMap<String, serde_json::Value>,
+    },
     WorkflowDispatch {
         repository: Repository,
         workflow: String,
@@ -276,6 +284,24 @@ pub enum Request {
         reference: String,
         #[serde(default)]
         inputs: BTreeMap<String, String>,
+    },
+    WorkflowCancel {
+        repository: Repository,
+        run_id: NonZeroU64,
+    },
+    WorkflowRerun {
+        repository: Repository,
+        run_id: NonZeroU64,
+        #[serde(default)]
+        failed_only: bool,
+    },
+    WorkflowEnable {
+        repository: Repository,
+        workflow: String,
+    },
+    WorkflowDisable {
+        repository: Repository,
+        workflow: String,
     },
 }
 
@@ -527,6 +553,19 @@ impl Request {
                     files: prepare_commit_files(files)?,
                 })
             }
+            Self::RepositoryDispatch {
+                repository,
+                event_type,
+                client_payload,
+            } => {
+                validate_repository_dispatch(&event_type, &client_payload)?;
+                Ok(Operation::RepositoryDispatch {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    event_type,
+                    client_payload,
+                })
+            }
             Self::WorkflowDispatch {
                 repository,
                 workflow,
@@ -542,6 +581,43 @@ impl Request {
                     workflow,
                     reference,
                     inputs,
+                })
+            }
+            Self::WorkflowCancel { repository, run_id } => Ok(Operation::WorkflowCancel {
+                owner: repository.owner,
+                repository: repository.name,
+                run_id,
+            }),
+            Self::WorkflowRerun {
+                repository,
+                run_id,
+                failed_only,
+            } => Ok(Operation::WorkflowRerun {
+                owner: repository.owner,
+                repository: repository.name,
+                run_id,
+                failed_only,
+            }),
+            Self::WorkflowEnable {
+                repository,
+                workflow,
+            } => {
+                validate_workflow(&workflow)?;
+                Ok(Operation::WorkflowEnable {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    workflow,
+                })
+            }
+            Self::WorkflowDisable {
+                repository,
+                workflow,
+            } => {
+                validate_workflow(&workflow)?;
+                Ok(Operation::WorkflowDisable {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    workflow,
                 })
             }
         }
@@ -704,6 +780,12 @@ pub enum Operation {
         message: String,
         files: Vec<CommitFile>,
     },
+    RepositoryDispatch {
+        owner: String,
+        repository: String,
+        event_type: String,
+        client_payload: BTreeMap<String, serde_json::Value>,
+    },
     WorkflowDispatch {
         owner: String,
         repository: String,
@@ -711,6 +793,27 @@ pub enum Operation {
         #[serde(rename = "ref")]
         reference: String,
         inputs: BTreeMap<String, String>,
+    },
+    WorkflowCancel {
+        owner: String,
+        repository: String,
+        run_id: NonZeroU64,
+    },
+    WorkflowRerun {
+        owner: String,
+        repository: String,
+        run_id: NonZeroU64,
+        failed_only: bool,
+    },
+    WorkflowEnable {
+        owner: String,
+        repository: String,
+        workflow: String,
+    },
+    WorkflowDisable {
+        owner: String,
+        repository: String,
+        workflow: String,
     },
 }
 
@@ -741,7 +844,12 @@ impl Operation {
             Self::PullRequestReact { .. } => "pull_request_react",
             Self::PullRequestUpdateBranch { .. } => "pull_request_update_branch",
             Self::CommitCreate { .. } => "commit_create",
+            Self::RepositoryDispatch { .. } => "repository_dispatch",
             Self::WorkflowDispatch { .. } => "workflow_dispatch",
+            Self::WorkflowCancel { .. } => "workflow_cancel",
+            Self::WorkflowRerun { .. } => "workflow_rerun",
+            Self::WorkflowEnable { .. } => "workflow_enable",
+            Self::WorkflowDisable { .. } => "workflow_disable",
         }
     }
 }
@@ -900,8 +1008,23 @@ fn unclosed_code_fence(body: &str) -> Option<String> {
 }
 
 fn validate_branch(branch: &str) -> Result<()> {
-    if branch.trim().is_empty() || branch.len() > 255 || branch.contains(['\n', '\r']) {
-        bail!("branch must be between 1 and 255 bytes without newlines");
+    let invalid_component = branch.split('/').any(|component| {
+        component.is_empty()
+            || component.starts_with('.')
+            || component.as_bytes().ends_with(b".lock")
+    });
+    if branch.trim().is_empty()
+        || branch.len() > 255
+        || branch == "@"
+        || branch.ends_with('.')
+        || branch.contains("..")
+        || branch.contains("@{")
+        || branch
+            .chars()
+            .any(|character| character.is_control() || " ~^:?*[\\".contains(character))
+        || invalid_component
+    {
+        bail!("branch or tag must be a valid Git ref name between 1 and 255 bytes");
     }
     Ok(())
 }
@@ -934,6 +1057,32 @@ fn validate_workflow_inputs(inputs: &BTreeMap<String, String>) -> Result<()> {
     let payload_chars = serde_json::to_string(inputs)?.chars().count();
     if payload_chars > MAX_WORKFLOW_INPUT_PAYLOAD_CHARS {
         bail!("workflow inputs exceed {MAX_WORKFLOW_INPUT_PAYLOAD_CHARS} characters when encoded");
+    }
+    Ok(())
+}
+
+fn validate_repository_dispatch(
+    event_type: &str,
+    client_payload: &BTreeMap<String, serde_json::Value>,
+) -> Result<()> {
+    if event_type.trim().is_empty()
+        || event_type.len() > 100
+        || event_type.chars().any(char::is_control)
+    {
+        bail!(
+            "repository dispatch event type must be between 1 and 100 bytes without control characters"
+        );
+    }
+    if client_payload.len() > MAX_REPOSITORY_DISPATCH_PROPERTIES {
+        bail!(
+            "repository dispatch client payload supports at most {MAX_REPOSITORY_DISPATCH_PROPERTIES} top-level properties"
+        );
+    }
+    let payload_chars = serde_json::to_string(client_payload)?.chars().count();
+    if payload_chars > MAX_REPOSITORY_DISPATCH_PAYLOAD_CHARS {
+        bail!(
+            "repository dispatch client payload exceeds {MAX_REPOSITORY_DISPATCH_PAYLOAD_CHARS} characters when encoded"
+        );
     }
     Ok(())
 }
@@ -1172,7 +1321,12 @@ mod tests {
             r#"{"operation":"pull_request_react","repository":"owner/repo","number":1,"reaction":"eyes"}"#,
             r#"{"operation":"pull_request_update_branch","repository":"owner/repo","number":1}"#,
             r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"data: update roster","files":[{"path":"data/members.json","content":"[]"},{"path":"data/old.json","delete":true}]}"#,
+            r#"{"operation":"repository_dispatch","repository":"owner/repo","event_type":"apt-release","client_payload":{"version":"1.2.3"}}"#,
             r#"{"operation":"workflow_dispatch","repository":"owner/repo","workflow":"release.yml","ref":"main","inputs":{"release":"true"}}"#,
+            r#"{"operation":"workflow_cancel","repository":"owner/repo","run_id":1}"#,
+            r#"{"operation":"workflow_rerun","repository":"owner/repo","run_id":1,"failed_only":true}"#,
+            r#"{"operation":"workflow_enable","repository":"owner/repo","workflow":"release.yml"}"#,
+            r#"{"operation":"workflow_disable","repository":"owner/repo","workflow":"release.yml"}"#,
         ];
 
         for document in documents {
@@ -1230,12 +1384,98 @@ mod tests {
     }
 
     #[test]
+    fn serializes_repository_dispatch_contract() {
+        let request = serde_json::from_str::<Request>(
+            r#"{"operation":"repository_dispatch","repository":"owner/repo","event_type":"apt-release","client_payload":{"version":"1.2.3","retry":false}}"#,
+        )
+        .expect("request should parse");
+        let operation = request.prepare(true).expect("request should prepare");
+        assert_eq!(
+            serde_json::to_value(operation).expect("operation should serialize"),
+            serde_json::json!({
+                "operation": "repository_dispatch",
+                "owner": "owner",
+                "repository": "repo",
+                "event_type": "apt-release",
+                "client_payload": {"retry": false, "version": "1.2.3"}
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_workflow_control_contracts() {
+        let documents = [
+            (
+                r#"{"operation":"workflow_cancel","repository":"owner/repo","run_id":42}"#,
+                serde_json::json!({
+                    "operation": "workflow_cancel",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "run_id": 42
+                }),
+            ),
+            (
+                r#"{"operation":"workflow_rerun","repository":"owner/repo","run_id":42,"failed_only":true}"#,
+                serde_json::json!({
+                    "operation": "workflow_rerun",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "run_id": 42,
+                    "failed_only": true
+                }),
+            ),
+            (
+                r#"{"operation":"workflow_enable","repository":"owner/repo","workflow":"ci.yml"}"#,
+                serde_json::json!({
+                    "operation": "workflow_enable",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "workflow": "ci.yml"
+                }),
+            ),
+            (
+                r#"{"operation":"workflow_disable","repository":"owner/repo","workflow":"ci.yml"}"#,
+                serde_json::json!({
+                    "operation": "workflow_disable",
+                    "owner": "owner",
+                    "repository": "repo",
+                    "workflow": "ci.yml"
+                }),
+            ),
+        ];
+
+        for (document, expected) in documents {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            let operation = request.prepare(true).expect("request should prepare");
+            assert_eq!(
+                serde_json::to_value(operation).expect("operation should serialize"),
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn rejects_unsafe_workflow_identifier() {
         let request = serde_json::from_str::<Request>(
             r#"{"operation":"workflow_dispatch","repository":"owner/repo","workflow":"../release.yml","ref":"main"}"#,
         )
         .expect("request should parse");
         assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn rejects_unsafe_workflow_ref() {
+        for reference in ["../main", "refs//heads/main", "release.lock", "feature@{1}"] {
+            let document = serde_json::json!({
+                "operation": "workflow_dispatch",
+                "repository": "owner/repo",
+                "workflow": "release.yml",
+                "ref": reference
+            });
+            let request =
+                serde_json::from_value::<Request>(document).expect("request should parse");
+            assert!(request.prepare(true).is_err());
+        }
     }
 
     #[test]
@@ -1249,5 +1489,58 @@ mod tests {
         );
         let request = serde_json::from_str::<Request>(&document).expect("request should parse");
         assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_repository_dispatch_event_type() {
+        for event_type in ["", "line\nbreak"] {
+            let document = serde_json::json!({
+                "operation": "repository_dispatch",
+                "repository": "owner/repo",
+                "event_type": event_type
+            });
+            let request =
+                serde_json::from_value::<Request>(document).expect("request should parse");
+            assert!(request.prepare(true).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_too_many_repository_dispatch_properties() {
+        let client_payload = (0..11)
+            .map(|index| (format!("key{index}"), serde_json::json!(index)))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let document = serde_json::json!({
+            "operation": "repository_dispatch",
+            "repository": "owner/repo",
+            "event_type": "test",
+            "client_payload": client_payload
+        });
+        let request = serde_json::from_value::<Request>(document).expect("request should parse");
+        assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn rejects_oversized_repository_dispatch_payload() {
+        let document = serde_json::json!({
+            "operation": "repository_dispatch",
+            "repository": "owner/repo",
+            "event_type": "test",
+            "client_payload": {"value": "x".repeat(65_536)}
+        });
+        let request = serde_json::from_value::<Request>(document).expect("request should parse");
+        assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn rejects_zero_workflow_run_id() {
+        for operation in ["workflow_cancel", "workflow_rerun"] {
+            let document = serde_json::json!({
+                "operation": operation,
+                "repository": "owner/repo",
+                "run_id": 0
+            });
+            assert!(serde_json::from_value::<Request>(document).is_err());
+        }
     }
 }

@@ -2,11 +2,11 @@
 
 Pukbot is designed so agents can perform approved GitHub mutations without
 reading the GitHub App private key or its installation token. For comment,
-issue, commit, and workflow dispatch operations the agent invokes the public
-CLI, the CLI dispatches a protected workflow, and the workflow mints one
-short-lived token scoped to one repository. Pull request operations run
-through the user's own authenticated GitHub CLI session so the user, not the
-App, is the author.
+issue, commit, repository dispatch, and workflow mutation operations the agent
+invokes the public CLI, the CLI dispatches a protected workflow, and the
+workflow mints one short-lived token scoped to one repository. Pull request
+operations run through the user's own authenticated GitHub CLI session so the
+user, not the App, is the author.
 
 Add this policy to `AGENTS.md`:
 
@@ -38,6 +38,11 @@ The stable agent sequence is:
 Unknown JSON fields fail validation. Failed workflows return a nonzero exit
 code and print failed job logs. Text progress is suppressed when `--json` is
 active.
+
+Use `pukbot workflow status`, `watch`, and `logs` for read-only workflow
+inspection. A dispatched workflow can be followed immediately with
+`pukbot workflow dispatch ... --watch`. The watcher reports state changes,
+job conclusions, actor identities, URLs, and failed logs.
 
 ## Bodies
 

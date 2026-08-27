@@ -31,7 +31,7 @@ jobs:
     environment: pukbot-production
     steps:
       - id: app-token
-        if: fromJSON(inputs.payload).operation != 'workflow_dispatch'
+        if: ${{ !startsWith(fromJSON(inputs.payload).operation, 'workflow_') }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.PUKBOT_CLIENT_ID }}
@@ -42,7 +42,7 @@ jobs:
           permission-issues: write
           permission-pull-requests: write
       - id: workflow-token
-        if: fromJSON(inputs.payload).operation == 'workflow_dispatch'
+        if: ${{ startsWith(fromJSON(inputs.payload).operation, 'workflow_') }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.PUKBOT_CLIENT_ID }}
@@ -200,6 +200,11 @@ jobs:
               gh api --method PATCH "repos/${slug}/git/refs/heads/${branch}" -f sha="${commit_sha}" -F force=false >/dev/null
               result="https://github.com/${slug}/commit/${commit_sha}"
               ;;
+            repository_dispatch)
+              jq '{event_type, client_payload}' payload.json >request.json
+              gh api --method POST "repos/${slug}/dispatches" --input request.json >/dev/null
+              result="https://github.com/${slug}/actions"
+              ;;
             workflow_dispatch)
               workflow=$(jq -er \
                 '.workflow | select(test("^[A-Za-z0-9_.-]{1,255}$") and . != "." and . != "..")' \
@@ -211,6 +216,28 @@ jobs:
                 -H 'X-GitHub-Api-Version: 2026-03-10' \
                 "repos/${slug}/actions/workflows/${encoded_workflow}/dispatches" \
                 --input request.json --jq .html_url)
+              ;;
+            workflow_cancel)
+              run_id=$(jq -er '.run_id | select(. >= 1)' payload.json)
+              gh api --method POST "repos/${slug}/actions/runs/${run_id}/cancel" >/dev/null
+              result="https://github.com/${slug}/actions/runs/${run_id}"
+              ;;
+            workflow_rerun)
+              run_id=$(jq -er '.run_id | select(. >= 1)' payload.json)
+              route=rerun
+              if [ "$(jq -r '.failed_only' payload.json)" = true ]; then route=rerun-failed-jobs; fi
+              gh api --method POST "repos/${slug}/actions/runs/${run_id}/${route}" >/dev/null
+              result="https://github.com/${slug}/actions/runs/${run_id}"
+              ;;
+            workflow_enable | workflow_disable)
+              workflow=$(jq -er \
+                '.workflow | select(test("^[A-Za-z0-9_.-]{1,255}$") and . != "." and . != "..")' \
+                payload.json)
+              encoded_workflow=$(jq -rn --arg value "${workflow}" '$value | @uri')
+              route=enable
+              if [ "${operation}" = workflow_disable ]; then route=disable; fi
+              gh api --method PUT "repos/${slug}/actions/workflows/${encoded_workflow}/${route}" >/dev/null
+              result="https://github.com/${slug}/actions/workflows/${encoded_workflow}"
               ;;
             *)
               printf 'unsupported operation: %s\n' "${operation}" >&2

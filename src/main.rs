@@ -6,11 +6,13 @@ mod media;
 mod model;
 mod update;
 mod workflow;
+mod workflow_run;
 
 use std::collections::BTreeMap;
 use std::io::{self, IsTerminal, Read, Write};
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use std::{fs, process};
 
 use anyhow::{Context, Result, bail};
@@ -72,6 +74,10 @@ enum Commands {
     Commit {
         #[command(subcommand)]
         command: CommitCommand,
+    },
+    Repository {
+        #[command(subcommand)]
+        command: RepositoryCommand,
     },
     Workflow {
         #[command(subcommand)]
@@ -152,8 +158,20 @@ enum CommitCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum RepositoryCommand {
+    Dispatch(RepositoryDispatchArgs),
+}
+
+#[derive(Debug, Subcommand)]
 enum WorkflowCommand {
     Dispatch(WorkflowDispatchArgs),
+    Cancel(WorkflowRunArgs),
+    Rerun(WorkflowRerunArgs),
+    Enable(WorkflowTargetArgs),
+    Disable(WorkflowTargetArgs),
+    Status(WorkflowInspectArgs),
+    Watch(WorkflowWatchArgs),
+    Logs(WorkflowLogsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -253,6 +271,76 @@ struct WorkflowDispatchArgs {
     inputs: Vec<String>,
     #[arg(long)]
     dry_run: bool,
+    #[arg(long)]
+    watch: bool,
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u64).range(1..=60))]
+    interval: u64,
+}
+
+#[derive(Debug, Args)]
+struct RepositoryDispatchArgs {
+    #[arg(value_name = "EVENT_TYPE")]
+    event_type: String,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long, value_name = "JSON", conflicts_with = "client_payload_file")]
+    client_payload: Option<String>,
+    #[arg(long, value_name = "FILE", conflicts_with = "client_payload")]
+    client_payload_file: Option<PathBuf>,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct WorkflowRunArgs {
+    #[arg(value_name = "RUN_ID")]
+    run_id: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct WorkflowRerunArgs {
+    #[command(flatten)]
+    run: WorkflowRunArgs,
+    #[arg(long)]
+    failed_only: bool,
+}
+
+#[derive(Debug, Args)]
+struct WorkflowTargetArgs {
+    #[arg(value_name = "WORKFLOW")]
+    workflow: String,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct WorkflowInspectArgs {
+    #[arg(value_name = "RUN_ID")]
+    run_id: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+}
+
+#[derive(Debug, Args)]
+struct WorkflowWatchArgs {
+    #[command(flatten)]
+    run: WorkflowInspectArgs,
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u64).range(1..=60))]
+    interval: u64,
+}
+
+#[derive(Debug, Args)]
+struct WorkflowLogsArgs {
+    #[command(flatten)]
+    run: WorkflowInspectArgs,
+    #[arg(long)]
+    failed: bool,
 }
 
 #[derive(Debug, Args)]
@@ -382,6 +470,13 @@ struct MutationResult {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct WorkflowDispatchWatchResult {
+    mutation: MutationResult,
+    run: workflow_run::WorkflowRun,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Capabilities {
     protocol_version: u8,
     commands: Vec<&'static str>,
@@ -396,6 +491,7 @@ struct Capabilities {
 struct Attribution {
     user: Vec<&'static str>,
     app: Vec<&'static str>,
+    read_only: Vec<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -426,6 +522,7 @@ fn run() -> Result<()> {
         Commands::Issue { command } => run_issue(command, cli.json),
         Commands::Pr { command } => run_pull_request(command, cli.json),
         Commands::Commit { command } => run_commit(command, cli.json),
+        Commands::Repository { command } => run_repository(command, cli.json),
         Commands::Workflow { command } => run_workflow(command, cli.json),
         Commands::Completions(args) => run_completions(args, cli.json),
         Commands::Man(args) => run_manual(args, cli.json),
@@ -745,19 +842,144 @@ fn run_commit(command: CommitCommand, json: bool) -> Result<()> {
     }
 }
 
-fn run_workflow(command: WorkflowCommand, json: bool) -> Result<()> {
+fn run_repository(command: RepositoryCommand, json: bool) -> Result<()> {
     match command {
-        WorkflowCommand::Dispatch(args) => execute(
-            Request::WorkflowDispatch {
+        RepositoryCommand::Dispatch(args) => execute(
+            Request::RepositoryDispatch {
                 repository: args.repo,
-                workflow: args.workflow,
-                reference: args.reference,
-                inputs: parse_workflow_inputs(&args.inputs)?,
+                event_type: args.event_type,
+                client_payload: read_client_payload(
+                    args.client_payload.as_deref(),
+                    args.client_payload_file.as_deref(),
+                )?,
             },
             args.dry_run,
             json,
         ),
     }
+}
+
+fn run_workflow(command: WorkflowCommand, json: bool) -> Result<()> {
+    match command {
+        WorkflowCommand::Dispatch(args) => {
+            let repository = args.repo.clone();
+            let request = Request::WorkflowDispatch {
+                repository: args.repo,
+                workflow: args.workflow,
+                reference: args.reference,
+                inputs: parse_workflow_inputs(&args.inputs)?,
+            };
+            if args.watch {
+                if args.dry_run {
+                    bail!("--watch cannot be combined with --dry-run");
+                }
+                execute_workflow_dispatch(
+                    request,
+                    &repository,
+                    Duration::from_secs(args.interval),
+                    json,
+                )
+            } else {
+                execute(request, args.dry_run, json)
+            }
+        }
+        WorkflowCommand::Cancel(args) => execute(
+            Request::WorkflowCancel {
+                repository: args.repo,
+                run_id: args.run_id,
+            },
+            args.dry_run,
+            json,
+        ),
+        WorkflowCommand::Rerun(args) => execute(
+            Request::WorkflowRerun {
+                repository: args.run.repo,
+                run_id: args.run.run_id,
+                failed_only: args.failed_only,
+            },
+            args.run.dry_run,
+            json,
+        ),
+        WorkflowCommand::Enable(args) => execute(
+            Request::WorkflowEnable {
+                repository: args.repo,
+                workflow: args.workflow,
+            },
+            args.dry_run,
+            json,
+        ),
+        WorkflowCommand::Disable(args) => execute(
+            Request::WorkflowDisable {
+                repository: args.repo,
+                workflow: args.workflow,
+            },
+            args.dry_run,
+            json,
+        ),
+        WorkflowCommand::Status(args) => {
+            let run = workflow_run::inspect(&args.repo, args.run_id)?;
+            workflow_run::emit_status(&run, json)
+        }
+        WorkflowCommand::Watch(args) => {
+            let output = if json {
+                workflow_run::WatchOutput::Json
+            } else {
+                workflow_run::WatchOutput::Text
+            };
+            workflow_run::watch(
+                &args.run.repo,
+                args.run.run_id,
+                Duration::from_secs(args.interval),
+                output,
+            )?;
+            Ok(())
+        }
+        WorkflowCommand::Logs(args) => {
+            workflow_run::emit_logs(&args.run.repo, args.run.run_id, args.failed, json)
+        }
+    }
+}
+
+fn execute_workflow_dispatch(
+    request: Request,
+    repository: &Repository,
+    interval: Duration,
+    json: bool,
+) -> Result<()> {
+    let operation = request.prepare(false)?;
+    let mutation = perform_operation(&operation, !json)?;
+    let resource_url = mutation
+        .resource_url
+        .as_deref()
+        .context("workflow dispatch did not return a run URL")?;
+    let run_id = workflow_run::run_id_from_url(repository, resource_url)?;
+    if !json {
+        emit_text_result(&mutation)?;
+    }
+    let output = if json {
+        workflow_run::WatchOutput::Quiet
+    } else {
+        workflow_run::WatchOutput::Text
+    };
+    let run = workflow_run::watch(repository, run_id, interval, output)?;
+    if json {
+        emit_json(&WorkflowDispatchWatchResult { mutation, run })?;
+    }
+    Ok(())
+}
+
+fn read_client_payload(
+    inline: Option<&str>,
+    path: Option<&Path>,
+) -> Result<BTreeMap<String, serde_json::Value>> {
+    let contents = if let Some(inline) = inline {
+        inline.to_owned()
+    } else if let Some(path) = path {
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?
+    } else {
+        "{}".to_owned()
+    };
+    serde_json::from_str(&contents).context("client payload must be a JSON object")
 }
 
 fn parse_workflow_inputs(values: &[String]) -> Result<BTreeMap<String, String>> {
@@ -778,26 +1000,30 @@ fn execute(request: Request, dry_run: bool, json: bool) -> Result<()> {
     if dry_run {
         return emit_json(&operation);
     }
-    let output = if local::runs_locally(&operation) {
-        MutationResult {
-            operation: operation.name().to_owned(),
-            authored_by: "user",
-            workflow_url: None,
-            resource_url: Some(local::execute(&operation)?),
-        }
-    } else {
-        let result = workflow::dispatch(&operation, !json)?;
-        MutationResult {
-            operation: operation.name().to_owned(),
-            authored_by: "pukbot",
-            workflow_url: Some(result.workflow_url),
-            resource_url: result.resource_url,
-        }
-    };
+    let output = perform_operation(&operation, !json)?;
     if json {
         emit_json(&output)
     } else {
         emit_text_result(&output)
+    }
+}
+
+fn perform_operation(operation: &model::Operation, stream: bool) -> Result<MutationResult> {
+    if local::runs_locally(operation) {
+        Ok(MutationResult {
+            operation: operation.name().to_owned(),
+            authored_by: "user",
+            workflow_url: None,
+            resource_url: Some(local::execute(operation)?),
+        })
+    } else {
+        let result = workflow::dispatch(operation, stream)?;
+        Ok(MutationResult {
+            operation: operation.name().to_owned(),
+            authored_by: "pukbot",
+            workflow_url: Some(result.workflow_url),
+            resource_url: result.resource_url,
+        })
     }
 }
 
@@ -884,7 +1110,46 @@ fn emit_json(value: &impl Serialize) -> Result<()> {
 }
 
 fn emit_capabilities(json: bool) -> Result<()> {
-    let capabilities = Capabilities {
+    let capabilities = capabilities();
+    if json {
+        emit_json(&capabilities)
+    } else {
+        let mut stdout = io::stdout().lock();
+        writeln!(stdout, "protocol: {}", capabilities.protocol_version)?;
+        writeln!(stdout, "commands: {}", capabilities.commands.join(", "))?;
+        writeln!(stdout, "media: {}", capabilities.media.join(", "))?;
+        writeln!(
+            stdout,
+            "markdown: {} verbatim, up to {} bytes",
+            capabilities.markdown.flavor, capabilities.markdown.max_body_bytes
+        )?;
+        writeln!(
+            stdout,
+            "markdown features: {}",
+            capabilities.markdown.features.join(", ")
+        )?;
+        writeln!(stdout, "output: {}", capabilities.output.join(", "))?;
+        writeln!(
+            stdout,
+            "authored by you: {}",
+            capabilities.attribution.user.join(", ")
+        )?;
+        writeln!(
+            stdout,
+            "authored by pukbot: {}",
+            capabilities.attribution.app.join(", ")
+        )?;
+        writeln!(
+            stdout,
+            "read only: {}",
+            capabilities.attribution.read_only.join(", ")
+        )?;
+        Ok(())
+    }
+}
+
+fn capabilities() -> Capabilities {
+    Capabilities {
         protocol_version: 1,
         commands: vec![
             "apply",
@@ -912,7 +1177,15 @@ fn emit_capabilities(json: bool) -> Result<()> {
             "pr.react",
             "pr.update-branch",
             "commit.create",
+            "repository.dispatch",
             "workflow.dispatch",
+            "workflow.cancel",
+            "workflow.rerun",
+            "workflow.enable",
+            "workflow.disable",
+            "workflow.status",
+            "workflow.watch",
+            "workflow.logs",
             "completions",
             "man",
             "update",
@@ -948,39 +1221,15 @@ fn emit_capabilities(json: bool) -> Result<()> {
                 "issue.assignees",
                 "issue.react",
                 "commit.create",
+                "repository.dispatch",
                 "workflow.dispatch",
+                "workflow.cancel",
+                "workflow.rerun",
+                "workflow.enable",
+                "workflow.disable",
             ],
+            read_only: vec!["workflow.status", "workflow.watch", "workflow.logs"],
         },
-    };
-    if json {
-        emit_json(&capabilities)
-    } else {
-        let mut stdout = io::stdout().lock();
-        writeln!(stdout, "protocol: {}", capabilities.protocol_version)?;
-        writeln!(stdout, "commands: {}", capabilities.commands.join(", "))?;
-        writeln!(stdout, "media: {}", capabilities.media.join(", "))?;
-        writeln!(
-            stdout,
-            "markdown: {} verbatim, up to {} bytes",
-            capabilities.markdown.flavor, capabilities.markdown.max_body_bytes
-        )?;
-        writeln!(
-            stdout,
-            "markdown features: {}",
-            capabilities.markdown.features.join(", ")
-        )?;
-        writeln!(stdout, "output: {}", capabilities.output.join(", "))?;
-        writeln!(
-            stdout,
-            "authored by you: {}",
-            capabilities.attribution.user.join(", ")
-        )?;
-        writeln!(
-            stdout,
-            "authored by pukbot: {}",
-            capabilities.attribution.app.join(", ")
-        )?;
-        Ok(())
     }
 }
 
@@ -1027,7 +1276,9 @@ fn markdown_capabilities() -> Markdown {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_workflow_inputs;
+    use std::path::Path;
+
+    use super::{parse_workflow_inputs, read_client_payload};
 
     #[test]
     fn parses_workflow_inputs_at_first_equals_sign() {
@@ -1047,5 +1298,29 @@ mod tests {
     fn rejects_workflow_input_without_equals_sign() {
         let values = vec!["release".to_owned()];
         assert!(parse_workflow_inputs(&values).is_err());
+    }
+
+    #[test]
+    fn parses_inline_repository_dispatch_payload() {
+        let payload = read_client_payload(Some(r#"{"version":"1.2.3","retry":false}"#), None)
+            .expect("client payload should parse");
+        assert_eq!(payload.get("version"), Some(&serde_json::json!("1.2.3")));
+        assert_eq!(payload.get("retry"), Some(&serde_json::json!(false)));
+    }
+
+    #[test]
+    fn defaults_repository_dispatch_payload_to_empty_object() {
+        let payload = read_client_payload(None, None).expect("client payload should default");
+        assert!(payload.is_empty());
+    }
+
+    #[test]
+    fn rejects_non_object_repository_dispatch_payload() {
+        assert!(read_client_payload(Some("[]"), None).is_err());
+    }
+
+    #[test]
+    fn rejects_missing_repository_dispatch_payload_file() {
+        assert!(read_client_payload(None, Some(Path::new("missing-payload.json"))).is_err());
     }
 }

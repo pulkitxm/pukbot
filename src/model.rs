@@ -2641,6 +2641,19 @@ mod tests {
     }
 
     #[test]
+    fn rejects_oversized_deployment_payload() {
+        let document = serde_json::json!({
+            "operation": "deployment_create",
+            "repository": "owner/repo",
+            "ref": "main",
+            "environment": "staging",
+            "payload": {"value": "x".repeat(65_536)}
+        });
+        let request = serde_json::from_value::<Request>(document).expect("request should parse");
+        assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
     fn serializes_workflow_control_contracts() {
         let documents = [
             (

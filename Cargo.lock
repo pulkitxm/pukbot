@@ -359,7 +359,7 @@ dependencies = [
 
 [[package]]
 name = "pukbot"
-version = "0.3.18"
+version = "0.3.19"
 dependencies = [
  "anyhow",
  "base64",

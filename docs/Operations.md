@@ -183,6 +183,10 @@ pukbot pr assignees 123 --repo owner/repository --add octocat
 pukbot pr react 123 --repo owner/repository --reaction heart
 pukbot pr update-branch 123 --repo owner/repository
 pukbot pr merge 123 --repo owner/repository --yes
+pukbot pr create --repo owner/repository --title "automated update" \
+  --head automation --base main --as-app
+pukbot pr review 123 --repo owner/repository --event approve --as-app
+pukbot pr merge 123 --repo owner/repository --as-app --yes
 ```
 
 JSON operation names are:
@@ -209,7 +213,10 @@ Pull request operations run through the local authenticated GitHub CLI session
 rather than the Pukbot App, so the pull request author, the review, the merge
 event, and the squash commit on the base branch all belong to the
 authenticated user. Results report `"authoredBy": "user"` and a `null`
-`workflowUrl`. See [Attribution](#attribution).
+`workflowUrl`. Create, edit, merge, review, and update-branch accept `--as-app`
+to run through the protected workflow as Pukbot instead. The matching JSON
+operations accept `"as_app": true`. App merges always use squash merge. See
+[Attribution](#attribution).
 
 Pull request descriptions and review bodies receive no disclosure footer. Task
 lists in a description feed the pull request task counter.
@@ -229,15 +236,18 @@ changes:
 
 ```bash
 pukbot commit create data/members.json --repo owner/repository --branch main --message "data: update roster"
+pukbot commit create data/members.json --repo owner/repository --branch main \
+  --message "data: refresh roster" --as-app
 ```
 
 The commit records the requesting GitHub account as the commit author and the
 Pukbot App as the committer, so it appears as authored by you and committed by
-Pukbot and counts toward your contributions. Both identities are resolved
-inside the protected workflow from the requesting account and cannot be set
-from the CLI or your local git config. The branch ref update is never forced:
-if the branch has moved since the commit was built, the operation fails
-instead of overwriting the newer history.
+Pukbot and counts toward your contributions. Pass `--as-app`, or set
+`"as_app": true` in the typed JSON operation, to record Pukbot as both author
+and committer for a fully automated commit. Identities are resolved inside the
+protected workflow and cannot be supplied as arbitrary names or emails. The
+branch ref update is never forced: if the branch has moved since the commit was
+built, the operation fails instead of overwriting the newer history.
 
 ## Repository dispatches
 
@@ -357,18 +367,19 @@ Results report who GitHub records as the actor:
 }
 ```
 
-`authoredBy` is `user` for every `pr` operation, which executes locally under
-the authenticated GitHub CLI session. It is `pukbot` for every `comment`,
-`issue`, `commit`, repository dispatch, and workflow mutation, which executes
-inside the protected workflow under a short-lived App installation token;
-those results also carry a `workflowUrl`.
+`authoredBy` is `user` for ordinary `pr` operations, which execute locally
+under the authenticated GitHub CLI session. It is `pukbot` for pull request
+create, edit, merge, review, and update-branch with `--as-app`, and for every
+`comment`, `issue`, `commit`, repository dispatch, and workflow mutation.
+App operations execute inside the protected workflow under a short-lived App
+installation token and carry a `workflowUrl`.
 
 `pukbot capabilities --json` reports the same split under `attribution`.
 
-The JSON operation is `commit_create` and accepts `branch`, `message`, and a
-`files` array of `{path, content, delete}` objects. Set `delete: true` to
-remove a path, otherwise provide `content` as UTF-8 text. At most 50 files,
-60,000 bytes per file, and 120,000 bytes combined.
+The JSON operation is `commit_create` and accepts `branch`, `message`, an
+optional `as_app` Boolean, and a `files` array of `{path, content, delete}`
+objects. Set `delete: true` to remove a path, otherwise provide `content` as
+UTF-8 text. At most 50 files, 60,000 bytes per file, and 120,000 bytes combined.
 
 Only text content is supported. Staged binary files (images, video, and
 other non-UTF-8 content) are rejected before any request is sent; commit

@@ -158,6 +158,42 @@ jobs:
                 --input request.json >/dev/null
               result="https://github.com/${slug}/issues/${number}"
               ;;
+            pull_request_create)
+              test "$(jq -r '.as_app' payload.json)" = true
+              jq '{title, body, head, base, draft} | with_entries(select(.value != null))' payload.json >request.json
+              result=$(gh api --method POST "repos/${slug}/pulls" --input request.json --jq .html_url)
+              ;;
+            pull_request_edit)
+              test "$(jq -r '.as_app' payload.json)" = true
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              jq '{title, body, base} | with_entries(select(.value != null))' payload.json >request.json
+              result=$(gh api --method PATCH "repos/${slug}/pulls/${number}" --input request.json --jq .html_url)
+              ;;
+            pull_request_merge)
+              test "$(jq -r '.as_app' payload.json)" = true
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              jq -n '{merge_method: "squash"}' >request.json
+              gh api --method PUT "repos/${slug}/pulls/${number}/merge" --input request.json >/dev/null
+              result="https://github.com/${slug}/pull/${number}"
+              ;;
+            pull_request_review)
+              test "$(jq -r '.as_app' payload.json)" = true
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              event=$(jq -er '.event | select(. == "approve" or . == "request_changes" or . == "comment")' payload.json)
+              if [ "${event}" = approve ]; then event=APPROVE; fi
+              if [ "${event}" = request_changes ]; then event=REQUEST_CHANGES; fi
+              if [ "${event}" = comment ]; then event=COMMENT; fi
+              jq --arg event "${event}" '{event: $event, body} | with_entries(select(.value != null))' payload.json >request.json
+              gh api --method POST "repos/${slug}/pulls/${number}/reviews" --input request.json >/dev/null
+              result="https://github.com/${slug}/pull/${number}"
+              ;;
+            pull_request_update_branch)
+              test "$(jq -r '.as_app' payload.json)" = true
+              number=$(jq -er '.number | select(. >= 1)' payload.json)
+              jq -n '{}' >request.json
+              gh api --method PUT "repos/${slug}/pulls/${number}/update-branch" --input request.json >/dev/null
+              result="https://github.com/${slug}/pull/${number}"
+              ;;
             commit_create)
               branch=$(jq -er '.branch | select(test("^[^\n\r]{1,255}$"))' payload.json)
               jq -j '.message' payload.json >message.txt
@@ -179,12 +215,19 @@ jobs:
               done
               tree_sha=$(jq -n --arg base "${base_tree}" --argjson tree "${entries}" '{base_tree: $base, tree: $tree}' |
                 gh api --method POST "repos/${slug}/git/trees" --input - --jq .sha)
-              author_name=$(gh api "users/${ACTOR}" --jq '.name // .login')
-              author_id=$(gh api "users/${ACTOR}" --jq .id)
-              author_email="${author_id}+${ACTOR}@users.noreply.github.com"
               committer_login='pukbot[bot]'
               committer_id=$(gh api "users/pukbot%5Bbot%5D" --jq .id)
               committer_email="${committer_id}+${committer_login}@users.noreply.github.com"
+              author_login=${ACTOR}
+              if [ "$(jq -r '.as_app' payload.json)" = true ]; then author_login=${committer_login}; fi
+              if [ "${author_login}" = "${committer_login}" ]; then
+                author_name=${committer_login}
+                author_id=${committer_id}
+              else
+                author_name=$(gh api "users/${author_login}" --jq '.name // .login')
+                author_id=$(gh api "users/${author_login}" --jq .id)
+              fi
+              author_email="${author_id}+${author_login}@users.noreply.github.com"
               commit_sha=$(jq -n --rawfile msg message.txt --arg tree "${tree_sha}" \
                 --arg parent "${base_sha}" --arg author_name "${author_name}" \
                 --arg author_email "${author_email}" --arg committer_name "${committer_login}" \

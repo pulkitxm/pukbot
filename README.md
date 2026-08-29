@@ -116,14 +116,14 @@ pukbot comment delete 456 --repo owner/repository --yes
 pukbot comment react 456 --repo owner/repository --reaction eyes
 ```
 
-For named inline media, provide one JSON request:
+For named media, provide one JSON request:
 
 ```json
 {
   "operation": "comment_create",
   "repository": "owner/repository",
   "number": 123,
-  "body": "{IMG1} Testing inline media. {VIDEO1}",
+  "body": "{IMG1}\n\nTesting block media.\n\n{VIDEO1}",
   "media": [
     {
       "name": "IMG1",
@@ -148,7 +148,8 @@ pukbot apply --input request.json --dry-run
 ```
 
 Each media object accepts exactly one `path` or `url`. Pukbot replaces every
-named placeholder in place. Local files up to 100 MiB support PNG, JPEG, GIF,
+named placeholder with a separate Markdown paragraph, even when the placeholder
+is adjacent to text. Local files up to 100 MiB support PNG, JPEG, GIF,
 WebP, BMP, TIFF, AVIF, SVG, MP4, MOV, WebM, MKV, M4V, MP3, WAV, OGG, M4A,
 FLAC, AAC, PDF, text, Markdown, JSON, CSV, ZIP, Gzip, Tar, and 7-Zip.
 
@@ -326,7 +327,8 @@ Bodies are GitHub-flavored Markdown posted verbatim: fence code, logs, and
 command output in code blocks with a language identifier, and use headings,
 tables, task lists, and `<details>` sections instead of plain text. Close every
 code fence. Pass multiline bodies with `--body-file <file>` or stdin. Use a
-JSON request with `pukbot apply --input <file>` for named inline media. Use
+JSON request with `pukbot apply --input <file>` for named media. Each media
+placeholder renders as a separate paragraph. Use
 `--json` when consuming output. Local media is uploaded publicly. Pukbot
 appends the required disclosure footer to comments.
 ```

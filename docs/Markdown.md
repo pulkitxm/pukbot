@@ -10,9 +10,10 @@ results belong in fenced code blocks, not in a wall of prose.
 
 ## What Pukbot does to a body
 
-- The body is passed through verbatim. Pukbot never reflows, wraps, trims, or
+- Body text is passed through verbatim. Pukbot never reflows, wraps, trims, or
   re-escapes it.
-- Named media placeholders are replaced in place, before anything is sent.
+- Named media placeholders are replaced before anything is sent. Each resolved
+  media item is separated from adjacent content as its own Markdown paragraph.
 - Comment bodies receive the disclosure footer, separated by a blank line, a
   thematic break, and another blank line, so the footer never joins the last
   block of the body.

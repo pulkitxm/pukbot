@@ -98,7 +98,8 @@ pukbot comment react 456 --repo owner/repository --reaction eyes
 
 JSON operations are `comment_create`, `comment_edit`, `comment_delete`, and
 `comment_react`. Comment create and edit accept `body` plus an optional `media`
-array. Media names replace matching `{NAME}` placeholders inline.
+array. Media names replace matching `{NAME}` placeholders as separate Markdown
+paragraphs.
 
 The disclosure footer is appended to comment bodies after a blank line and a
 thematic break, so it never joins the last block of the body.
@@ -108,7 +109,7 @@ thematic break, so it never joins the last block of the body.
   "operation": "comment_create",
   "repository": "owner/repository",
   "number": 123,
-  "body": "{SCREENSHOT} result {DEMO}",
+  "body": "{SCREENSHOT}\n\nresult\n\n{DEMO}",
   "media": [
     {
       "name": "SCREENSHOT",

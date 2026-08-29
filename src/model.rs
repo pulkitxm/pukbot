@@ -1503,10 +1503,35 @@ fn prepare_document(document: CommentDocument, dry_run: bool) -> Result<String> 
             bail!("comment body does not contain media placeholder {placeholder}");
         }
         let markdown = media::resolve(&item, dry_run)?;
-        body = body.replace(&placeholder, &markdown);
+        body = replace_media_placeholder(&body, &placeholder, &markdown);
     }
     validate_body(&body)?;
     Ok(body)
+}
+
+fn replace_media_placeholder(body: &str, placeholder: &str, markdown: &str) -> String {
+    let mut rendered = String::with_capacity(body.len() + markdown.len());
+    let mut remaining = body;
+    while let Some(index) = remaining.find(placeholder) {
+        let before = remaining[..index].trim_end_matches([' ', '\t']);
+        rendered.push_str(before);
+        if !rendered.is_empty() && !rendered.ends_with("\n\n") {
+            if !rendered.ends_with('\n') {
+                rendered.push('\n');
+            }
+            rendered.push('\n');
+        }
+        rendered.push_str(markdown);
+        remaining = remaining[index + placeholder.len()..].trim_start_matches([' ', '\t']);
+        if !remaining.is_empty() && !remaining.starts_with("\n\n") {
+            rendered.push('\n');
+            if !remaining.starts_with('\n') {
+                rendered.push('\n');
+            }
+        }
+    }
+    rendered.push_str(remaining);
+    rendered
 }
 
 fn prepare_labels(
@@ -2149,6 +2174,63 @@ mod tests {
         let operation = request.prepare(true).expect("request should prepare");
         match operation {
             Operation::CreateComment { body: prepared, .. } => assert_eq!(prepared, body),
+            other => panic!("unexpected operation: {}", other.name()),
+        }
+    }
+
+    #[test]
+    fn renders_media_placeholders_as_separate_paragraphs() {
+        let document = serde_json::json!({
+            "operation": "comment_create",
+            "repository": "owner/repo",
+            "number": 1,
+            "body": "{IMG1} readiness stays fixed. {IMG2} bounded rows stay fast.",
+            "media": [
+                {
+                    "name": "IMG1",
+                    "url": "https://example.com/readiness.png",
+                    "alt": "stable readiness"
+                },
+                {
+                    "name": "IMG2",
+                    "url": "https://example.com/rows.png",
+                    "alt": "bounded rows"
+                }
+            ]
+        })
+        .to_string();
+        let request = serde_json::from_str::<Request>(&document).expect("request should parse");
+        let operation = request.prepare(true).expect("request should prepare");
+        match operation {
+            Operation::CreateComment { body, .. } => assert_eq!(
+                body,
+                "![stable readiness](https://example.com/readiness.png)\n\nreadiness stays fixed.\n\n![bounded rows](https://example.com/rows.png)\n\nbounded rows stay fast."
+            ),
+            other => panic!("unexpected operation: {}", other.name()),
+        }
+    }
+
+    #[test]
+    fn preserves_existing_media_paragraph_boundaries() {
+        let document = serde_json::json!({
+            "operation": "comment_create",
+            "repository": "owner/repo",
+            "number": 1,
+            "body": "result\n\n{IMG1}\n\ndone",
+            "media": [{
+                "name": "IMG1",
+                "url": "https://example.com/result.png",
+                "alt": "result"
+            }]
+        })
+        .to_string();
+        let request = serde_json::from_str::<Request>(&document).expect("request should parse");
+        let operation = request.prepare(true).expect("request should prepare");
+        match operation {
+            Operation::CreateComment { body, .. } => assert_eq!(
+                body,
+                "result\n\n![result](https://example.com/result.png)\n\ndone"
+            ),
             other => panic!("unexpected operation: {}", other.name()),
         }
     }

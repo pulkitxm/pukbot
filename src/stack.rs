@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 #[cfg(unix)]
-use std::os::unix::process::ExitStatusExt;
+use std::os::unix::process::CommandExt as _;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -17,24 +17,25 @@ use crate::model::{Operation, Repository};
 const MERGE_POLL_ATTEMPTS: usize = 600;
 
 pub fn run_extension(arguments: Vec<OsString>) -> Result<ExitStatus> {
-    Command::new("gh")
-        .arg("stack")
-        .args(arguments)
-        .status()
-        .context(
+    let mut command = Command::new("gh");
+    command.arg("stack").args(arguments);
+    #[cfg(unix)]
+    {
+        let error = command.exec();
+        Err(error).context(
             "failed to launch gh-stack; install GitHub CLI and run `gh extension install github/gh-stack`",
         )
+    }
+    #[cfg(not(unix))]
+    {
+        command.status().context(
+            "failed to launch gh-stack; install GitHub CLI and run `gh extension install github/gh-stack`",
+        )
+    }
 }
 
 pub fn extension_exit_code(status: ExitStatus) -> i32 {
-    if let Some(code) = status.code() {
-        return code;
-    }
-    #[cfg(unix)]
-    if let Some(signal) = status.signal() {
-        return 128 + signal;
-    }
-    1
+    status.code().unwrap_or(1)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -110,6 +111,22 @@ struct PullRequestHeadResource {
     sha: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalStackView {
+    branches: Vec<LocalStackBranch>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LocalStackBranch {
+    pr: Option<LocalStackPullRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LocalStackPullRequest {
+    number: NonZeroU64,
+}
+
 pub fn list(repository: &Repository, pull_request: Option<NonZeroU64>) -> Result<Vec<RemoteStack>> {
     list_parts(&repository.owner, &repository.name, pull_request)
 }
@@ -124,6 +141,49 @@ pub fn merge_status(
     uuid: &str,
 ) -> Result<AsyncMergeResult> {
     merge_status_parts(&repository.owner, &repository.name, pull_request, uuid)
+}
+
+pub fn current_repository() -> Result<Repository> {
+    let output = Command::new("gh")
+        .args([
+            "repo",
+            "view",
+            "--json",
+            "nameWithOwner",
+            "--jq",
+            ".nameWithOwner",
+        ])
+        .output()
+        .context("failed to launch gh; install and authenticate GitHub CLI")?;
+    ensure_command_success("resolve the current repository", &output)?;
+    let slug = String::from_utf8(output.stdout)
+        .context("GitHub CLI returned a non-UTF-8 repository name")?;
+    slug.trim().parse().map_err(anyhow::Error::msg)
+}
+
+pub fn resolve_compatibility_merge_target(
+    repository: &Repository,
+    target: Option<NonZeroU64>,
+) -> Result<NonZeroU64> {
+    if let Some(target) = target {
+        let stacks = list(repository, None)?;
+        if let Some(stack) = stacks.iter().find(|stack| stack.number == target) {
+            return top_pull_request(stack);
+        }
+        return Ok(target);
+    }
+    let output = Command::new("gh")
+        .args(["stack", "view", "--json"])
+        .output()
+        .context("failed to launch gh-stack; run `gh extension install github/gh-stack`")?;
+    ensure_command_success("read the current stack", &output)?;
+    let view = serde_json::from_slice::<LocalStackView>(&output.stdout)
+        .context("failed to decode the current gh-stack state")?;
+    view.branches
+        .into_iter()
+        .rev()
+        .find_map(|branch| branch.pr.map(|pull_request| pull_request.number))
+        .context("the current stack has no pull requests to merge")
 }
 
 pub fn emit_list(stacks: &[RemoteStack]) -> Result<()> {
@@ -413,6 +473,20 @@ fn ensure_success(method: &str, path: &str, output: &Output) -> Result<()> {
         stderr.trim()
     };
     bail!("GitHub rejected {method} {path}: {message}")
+}
+
+fn ensure_command_success(action: &str, output: &Output) -> Result<()> {
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let message = if stderr.trim().is_empty() {
+        stdout.trim()
+    } else {
+        stderr.trim()
+    };
+    bail!("failed to {action}: {message}")
 }
 
 fn top_pull_request(stack: &RemoteStack) -> Result<NonZeroU64> {

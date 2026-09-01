@@ -169,6 +169,65 @@ esac"#;
 }
 
 #[test]
+fn forwards_a_leading_global_json_flag_to_stack_view() {
+    let behavior = r#"case "$*" in
+    "stack view --json") printf '%s\n' '{"branches":[]}' ;;
+    *) exit 91 ;;
+esac"#;
+    let fake = FakeGh::new(behavior);
+
+    let output = fake.run(&["--json", "stack", "view"]);
+    assert_success(&output);
+    assert_eq!(output.stdout, b"{\"branches\":[]}\n");
+    assert_eq!(fake.log(), "stack view --json\n");
+}
+
+#[test]
+fn rejects_non_squash_compatibility_merges() {
+    let fake = FakeGh::new("exit 91");
+
+    let output = fake.run(&["stack", "merge", "12", "--merge", "--yes"]);
+    assert_failure(&output, "stack merges are squash-only");
+    assert!(!fake.log.exists());
+}
+
+#[test]
+fn compatibility_merge_resolves_current_top_and_forces_squash() {
+    let behavior = r#"case "$*" in
+    "repo view --json nameWithOwner --jq .nameWithOwner")
+        printf '%s\n' 'owner/repo'
+        ;;
+    "stack view --json")
+        printf '%s\n' '{"branches":[{"pr":{"number":11}},{"pr":{"number":12}}]}'
+        ;;
+    "api --method GET repos/owner/repo/pulls/12")
+        printf '%s\n' '{"stack":{"number":42},"head":{"sha":"bbb"}}'
+        ;;
+    "api --method PUT repos/owner/repo/pulls/12/merge-async --input -")
+        body=$(cat)
+        printf 'body=%s\n' "$body" >>"$PUKBOT_FAKE_GH_LOG"
+        printf '%s\n' '{"status":"merged","details":{"message":"merged","sha":"abc"}}'
+        ;;
+    *) exit 91 ;;
+esac"#;
+    let fake = FakeGh::new(behavior);
+
+    let output = fake.run(&["stack", "merge", "--yes"]);
+    assert_success(&output);
+    assert_eq!(output.stdout, b"https://github.com/owner/repo/pull/12\n");
+    assert_eq!(
+        fake.log(),
+        concat!(
+            "repo view --json nameWithOwner --jq .nameWithOwner\n",
+            "stack view --json\n",
+            "api --method GET repos/owner/repo/pulls/12\n",
+            "api --method PUT repos/owner/repo/pulls/12/merge-async --input -\n",
+            "body={\"merge_action\":\"direct_merge\",\"merge_method\":\"squash\",\"sha\":\"bbb\"}\n"
+        )
+    );
+}
+
+#[test]
 fn creates_and_appends_with_ordered_pull_request_bodies() {
     let added_stack = STACK.replace("\"number\": 12", "\"number\": 14");
     let behavior = format!(

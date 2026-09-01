@@ -35,11 +35,12 @@ The stable agent sequence is:
 and `pukbot` for App operations. `workflowUrl` is `null` when no workflow runs.
 `pukbot capabilities --json` reports the split under `attribution`.
 
-For stacked pull requests, `pukbot stack` forwards the complete installed
-gh-stack command surface with the current working directory, terminal, and
-exit status intact. For deterministic agent mutations, use Git for pushes and
-local topology, then use Pukbot's typed operations. Create or edit the pull
-requests first, disable auto-merge where necessary, and call `stack_create` or
+For stacked pull requests, `pukbot stack` exposes the installed gh-stack
+command surface with the current working directory, terminal, and exit status
+intact. Its merge command is the squash-only exception and uses Pukbot's direct
+merge API. For deterministic agent mutations, use Git for pushes and local
+topology, then use Pukbot's typed operations. Create or edit the pull requests
+first, disable auto-merge where necessary, and call `stack_create` or
 `stack_append` with pull request numbers ordered bottom to top. Use
 `stack_merge` instead of an ordinary GitHub merge command. Pukbot's existing
 `pull_request_merge` operation also detects stack membership and selects the

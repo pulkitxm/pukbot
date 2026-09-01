@@ -867,6 +867,32 @@ struct StackMergeStatusArgs {
     repo: Repository,
 }
 
+#[derive(Debug, Parser)]
+#[command(
+    name = "pukbot stack merge",
+    about = "Squash-merge a stack directly through GitHub"
+)]
+struct StackCompatibilityMergeArgs {
+    #[arg(value_name = "STACK_NUMBER_OR_PULL_REQUEST")]
+    target: Option<NonZeroU64>,
+    #[arg(long, value_parser = ["squash"], conflicts_with_all = ["merge", "rebase", "squash"])]
+    merge_method: Option<String>,
+    #[command(flatten)]
+    shortcuts: StackCompatibilityMergeShortcuts,
+    #[arg(short = 'y', long)]
+    yes: bool,
+}
+
+#[derive(Debug, Args)]
+struct StackCompatibilityMergeShortcuts {
+    #[arg(long, conflicts_with_all = ["merge_method", "rebase", "squash"])]
+    merge: bool,
+    #[arg(long, conflicts_with_all = ["merge_method", "merge", "squash"])]
+    rebase: bool,
+    #[arg(long, conflicts_with_all = ["merge_method", "merge", "rebase"])]
+    squash: bool,
+}
+
 #[derive(Debug, Args)]
 struct ListEditArgs {
     number: NonZeroU64,
@@ -945,7 +971,7 @@ struct Markdown {
 
 fn main() {
     if let Some(arguments) = raw_stack_arguments() {
-        exit_with_stack_extension(arguments);
+        exit_with_stack_command(arguments);
     }
     if let Err(error) = run() {
         drop(writeln!(io::stderr().lock(), "error: {error:#}"));
@@ -954,15 +980,35 @@ fn main() {
 }
 
 fn raw_stack_arguments() -> Option<Vec<OsString>> {
-    let mut arguments = env::args_os();
-    arguments.next()?;
-    if arguments.next()?.as_os_str() != OsStr::new("stack") {
-        return None;
+    let mut arguments = env::args_os().skip(1).collect::<Vec<_>>();
+    if arguments.first()?.as_os_str() == OsStr::new("stack") {
+        arguments.remove(0);
+        return Some(arguments);
     }
-    Some(arguments.collect())
+    if arguments.first()?.as_os_str() == OsStr::new("--json")
+        && arguments.get(1)?.as_os_str() == OsStr::new("stack")
+    {
+        arguments.drain(..2);
+        arguments.push(OsString::from("--json"));
+        return Some(arguments);
+    }
+    None
 }
 
-fn exit_with_stack_extension(arguments: Vec<OsString>) -> ! {
+fn exit_with_stack_command(arguments: Vec<OsString>) -> ! {
+    if arguments
+        .first()
+        .is_some_and(|argument| argument.as_os_str() == OsStr::new("merge"))
+    {
+        let result = run_stack_compatibility_merge(arguments.into_iter().skip(1));
+        match result {
+            Ok(()) => process::exit(0),
+            Err(error) => {
+                drop(writeln!(io::stderr().lock(), "error: {error:#}"));
+                process::exit(1);
+            }
+        }
+    }
     match stack::run_extension(arguments) {
         Ok(status) => process::exit(stack::extension_exit_code(status)),
         Err(error) => {
@@ -970,6 +1016,27 @@ fn exit_with_stack_extension(arguments: Vec<OsString>) -> ! {
             process::exit(1);
         }
     }
+}
+
+fn run_stack_compatibility_merge(arguments: impl IntoIterator<Item = OsString>) -> Result<()> {
+    let parser_arguments = std::iter::once(OsString::from("pukbot stack merge"))
+        .chain(arguments)
+        .collect::<Vec<_>>();
+    let args = StackCompatibilityMergeArgs::try_parse_from(parser_arguments)
+        .unwrap_or_else(|error| error.exit());
+    if args.shortcuts.merge || args.shortcuts.rebase {
+        bail!("stack merges are squash-only; use --squash");
+    }
+    let _squash_requested = args.shortcuts.squash || args.merge_method.is_some();
+    if !args.yes {
+        bail!("stack merge requires --yes");
+    }
+    let repository = stack::current_repository()?;
+    let pull_request = stack::resolve_compatibility_merge_target(&repository, args.target)?;
+    let resource_url =
+        stack::merge_pull_request(&repository.owner, &repository.name, pull_request)?;
+    writeln!(io::stdout().lock(), "{resource_url}")?;
+    Ok(())
 }
 
 fn run() -> Result<()> {
@@ -982,7 +1049,7 @@ fn run() -> Result<()> {
         Commands::Comment { command } => run_comment(command, cli.json),
         Commands::Issue { command } => run_issue(command, cli.json),
         Commands::Pr { command } => run_pull_request(command, cli.json),
-        Commands::Stack { arguments } => exit_with_stack_extension(arguments),
+        Commands::Stack { arguments } => exit_with_stack_command(arguments),
         Commands::StackApi { command } => run_stack_api(command, cli.json),
         Commands::Commit { command } => run_commit(command, cli.json),
         Commands::Wiki { command } => run_wiki(command, cli.json),

@@ -191,9 +191,12 @@ pukbot stack sync
 pukbot stack merge --yes --squash
 ```
 
-`pukbot stack` passes every argument, standard stream, terminal interaction,
-environment variable, working directory, and exit status through to
-`gh stack`. Run `pukbot stack --help` for the full extension command surface.
+Except for merge policy, `pukbot stack` passes every argument, standard stream,
+terminal interaction, environment variable, working directory, and exit status
+through to `gh stack`. `pukbot stack merge` keeps Pukbot's squash-only contract:
+it requires `--yes`, resolves the same stack or pull request target, and uses
+the verified direct merge API. Run `pukbot stack --help` for the extension
+command surface.
 
 Headless automation can use Pukbot's native stack API without local tracking:
 

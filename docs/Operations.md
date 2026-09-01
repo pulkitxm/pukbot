@@ -3,7 +3,8 @@
 Every native Pukbot mutation has a command and a typed JSON operation. Commands
 are convenient for interactive use. `pukbot apply --input request.json --json`
 is the canonical agent interface. The `pukbot stack` compatibility surface is
-the documented exception because it forwards directly to gh-stack.
+the documented exception because it delegates gh-stack workflows while
+retaining Pukbot's squash-only merge policy.
 
 ## Common contracts
 
@@ -235,10 +236,10 @@ queue, because the queue cannot guarantee squash.
 
 ## Stacked pull requests
 
-`pukbot stack` is a transparent entry point to the installed `gh stack`
-extension. Arguments, standard streams, terminal interaction, environment,
-working directory, and exit status pass through unchanged. Install the
-extension once on each machine:
+`pukbot stack` is an entry point to the installed `gh stack` extension.
+Arguments, standard streams, terminal interaction, environment, working
+directory, and exit status pass through unchanged for every command except
+merge. Install the extension once on each machine:
 
 ```bash
 gh extension install github/gh-stack
@@ -256,7 +257,7 @@ The complete extension surface is available:
 | `stack modify` | Restructure the current stack in the interactive editor. |
 | `stack unstack`, `stack delete` | Remove local tracking and optionally the GitHub stack. |
 | `stack link` | Push branches, create or find PRs, repair bases, and link the stack. |
-| `stack merge` | Select and asynchronously merge part or all of a stack. |
+| `stack merge` | Resolve the extension target, then direct squash-merge it through Pukbot. Requires `--yes`. |
 | `stack push` | Push active branches with per-branch lease checks. |
 | `stack rebase` | Fetch and cascade rebases through a stack. |
 | `stack submit` | Push branches, create or update PRs, and link the stack. |
@@ -266,6 +267,11 @@ The complete extension surface is available:
 | `stack top`, `stack bottom`, `stack trunk` | Jump to a stack boundary. |
 | `stack alias` | Create or remove a shell alias for `gh stack`. |
 | `stack feedback` | Open the extension feedback form. |
+
+The merge command intentionally rejects `--merge`, `--rebase`, and non-squash
+`--merge-method` values. With no target it reads the current gh-stack state and
+merges through its top pull request. A number is resolved as a stack number
+first, then as a pull request number, matching headless gh-stack behavior.
 
 For headless automation, Pukbot also exposes the native GitHub stack REST
 primitives under `stack-api` and as typed JSON operations. These commands do

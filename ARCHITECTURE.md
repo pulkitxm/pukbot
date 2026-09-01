@@ -10,8 +10,9 @@ key or an installation token.
 By default, pull request and stack API operations execute locally through the
 authenticated GitHub CLI session, so GitHub records the user as the author,
 reviewer, merger, and author of the squash commit. No workflow runs and no App
-token is minted. `pukbot stack` preserves the complete installed gh-stack
-extension interface for local, interactive, and composite workflows.
+token is minted. `pukbot stack` preserves the installed gh-stack extension
+interface for local, interactive, and composite workflows, while routing merge
+through Pukbot's direct squash-only implementation.
 `pukbot stack-api` provides noninteractive create, append, unstack, inspection,
 and asynchronous merge through GitHub's native stack endpoints. Pull request
 merge checks stack membership and selects the asynchronous endpoint when

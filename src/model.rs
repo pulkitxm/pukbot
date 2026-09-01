@@ -23,6 +23,7 @@ pub const MAX_RELEASE_ASSET_BYTES: usize = 40_000;
 pub const MAX_DEPLOYMENT_PAYLOAD_CHARS: usize = 65_535;
 pub const MAX_WIKI_DELETE_PATHS: usize = 500;
 pub const MAX_BATCH_TARGETS: usize = 50;
+pub const MAX_STACK_PULL_REQUESTS: usize = 100;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Repository {
@@ -331,6 +332,10 @@ pub enum Request {
         #[serde(default)]
         as_app: bool,
     },
+    PullRequestDisableAutoMerge {
+        repository: Repository,
+        number: NonZeroU64,
+    },
     PullRequestBatch {
         repository: Repository,
         numbers: Vec<NonZeroU64>,
@@ -352,6 +357,24 @@ pub enum Request {
         lock_reason: Option<LockReason>,
         #[serde(default)]
         allow_partial: bool,
+    },
+    StackCreate {
+        repository: Repository,
+        pull_requests: Vec<NonZeroU64>,
+    },
+    StackAdd {
+        repository: Repository,
+        stack_number: NonZeroU64,
+        pull_requests: Vec<NonZeroU64>,
+    },
+    StackUnstack {
+        repository: Repository,
+        stack_number: NonZeroU64,
+    },
+    StackMerge {
+        repository: Repository,
+        pull_request: Option<NonZeroU64>,
+        stack_number: Option<NonZeroU64>,
     },
     CommitCreate {
         repository: Repository,
@@ -768,6 +791,13 @@ impl Request {
                 number,
                 as_app,
             }),
+            Self::PullRequestDisableAutoMerge { repository, number } => {
+                Ok(Operation::PullRequestDisableAutoMerge {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    number,
+                })
+            }
             Self::PullRequestBatch {
                 repository,
                 numbers,
@@ -800,6 +830,53 @@ impl Request {
                 },
                 true,
             ),
+            Self::StackCreate {
+                repository,
+                pull_requests,
+            } => {
+                validate_stack_pull_requests(&pull_requests, 2)?;
+                Ok(Operation::StackCreate {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    pull_requests,
+                })
+            }
+            Self::StackAdd {
+                repository,
+                stack_number,
+                pull_requests,
+            } => {
+                validate_stack_pull_requests(&pull_requests, 1)?;
+                Ok(Operation::StackAdd {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    stack_number,
+                    pull_requests,
+                })
+            }
+            Self::StackUnstack {
+                repository,
+                stack_number,
+            } => Ok(Operation::StackUnstack {
+                owner: repository.owner,
+                repository: repository.name,
+                stack_number,
+            }),
+            Self::StackMerge {
+                repository,
+                pull_request,
+                stack_number,
+            } => {
+                if pull_request.is_some() == stack_number.is_some() {
+                    bail!("stack merge requires exactly one of pull_request or stack_number");
+                }
+                Ok(Operation::StackMerge {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    pull_request,
+                    stack_number,
+                })
+            }
             Self::CommitCreate {
                 repository,
                 branch,
@@ -1286,6 +1363,11 @@ pub enum Operation {
         number: NonZeroU64,
         as_app: bool,
     },
+    PullRequestDisableAutoMerge {
+        owner: String,
+        repository: String,
+        number: NonZeroU64,
+    },
     PullRequestBatch {
         owner: String,
         repository: String,
@@ -1300,6 +1382,28 @@ pub enum Operation {
         unlock: bool,
         lock_reason: Option<LockReason>,
         allow_partial: bool,
+    },
+    StackCreate {
+        owner: String,
+        repository: String,
+        pull_requests: Vec<NonZeroU64>,
+    },
+    StackAdd {
+        owner: String,
+        repository: String,
+        stack_number: NonZeroU64,
+        pull_requests: Vec<NonZeroU64>,
+    },
+    StackUnstack {
+        owner: String,
+        repository: String,
+        stack_number: NonZeroU64,
+    },
+    StackMerge {
+        owner: String,
+        repository: String,
+        pull_request: Option<NonZeroU64>,
+        stack_number: Option<NonZeroU64>,
     },
     CommitCreate {
         owner: String,
@@ -1468,7 +1572,12 @@ impl Operation {
             Self::PullRequestAssignees { .. } => "pull_request_assignees",
             Self::PullRequestReact { .. } => "pull_request_react",
             Self::PullRequestUpdateBranch { .. } => "pull_request_update_branch",
+            Self::PullRequestDisableAutoMerge { .. } => "pull_request_disable_auto_merge",
             Self::PullRequestBatch { .. } => "pull_request_batch",
+            Self::StackCreate { .. } => "stack_create",
+            Self::StackAdd { .. } => "stack_add",
+            Self::StackUnstack { .. } => "stack_unstack",
+            Self::StackMerge { .. } => "stack_merge",
             Self::CommitCreate { .. } => "commit_create",
             Self::WikiPublish { .. } => "wiki_publish",
             Self::RepositoryDispatch { .. } => "repository_dispatch",
@@ -2088,6 +2197,16 @@ fn validate_list_edit(add: &[String], remove: &[String], name: &str) -> Result<(
     validate_values(remove, name)
 }
 
+fn validate_stack_pull_requests(pull_requests: &[NonZeroU64], minimum: usize) -> Result<()> {
+    if pull_requests.len() < minimum || pull_requests.len() > MAX_STACK_PULL_REQUESTS {
+        bail!("stack operation requires {minimum} to {MAX_STACK_PULL_REQUESTS} pull requests");
+    }
+    if pull_requests.iter().collect::<HashSet<_>>().len() != pull_requests.len() {
+        bail!("stack pull request numbers must be unique");
+    }
+    Ok(())
+}
+
 fn validate_values(values: &[String], name: &str) -> Result<()> {
     if values.len() > 100
         || values
@@ -2310,7 +2429,13 @@ mod tests {
             r#"{"operation":"pull_request_assignees","repository":"owner/repo","number":1,"add":[],"remove":["user"]}"#,
             r#"{"operation":"pull_request_react","repository":"owner/repo","number":1,"reaction":"eyes"}"#,
             r#"{"operation":"pull_request_update_branch","repository":"owner/repo","number":1}"#,
+            r#"{"operation":"pull_request_disable_auto_merge","repository":"owner/repo","number":1}"#,
             r#"{"operation":"pull_request_batch","repository":"owner/repo","numbers":[3,4],"remove_labels":["batch"],"lock":true,"lock_reason":"resolved","allow_partial":true}"#,
+            r#"{"operation":"stack_create","repository":"owner/repo","pull_requests":[1,2]}"#,
+            r#"{"operation":"stack_add","repository":"owner/repo","stack_number":1,"pull_requests":[3]}"#,
+            r#"{"operation":"stack_unstack","repository":"owner/repo","stack_number":1}"#,
+            r#"{"operation":"stack_merge","repository":"owner/repo","pull_request":2}"#,
+            r#"{"operation":"stack_merge","repository":"owner/repo","stack_number":1}"#,
             r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"data: update roster","files":[{"path":"data/members.json","content":"[]"},{"path":"data/old.json","delete":true}]}"#,
             r#"{"operation":"wiki_publish","repository":"owner/repo","message":"docs: publish wiki","source_ref":"main","source_path":"wiki","delete":["Old.md"],"replace":false}"#,
             r#"{"operation":"repository_dispatch","repository":"owner/repo","event_type":"apt-release","client_payload":{"version":"1.2.3"}}"#,
@@ -2335,6 +2460,31 @@ mod tests {
             let request = serde_json::from_str::<Request>(document).expect("request should parse");
             let operation = request.prepare(true).expect("request should prepare");
             assert_ne!(operation.name(), "");
+        }
+    }
+
+    #[test]
+    fn validates_stack_members() {
+        let invalid = [
+            r#"{"operation":"stack_create","repository":"owner/repo","pull_requests":[1]}"#,
+            r#"{"operation":"stack_create","repository":"owner/repo","pull_requests":[1,1]}"#,
+            r#"{"operation":"stack_add","repository":"owner/repo","stack_number":1,"pull_requests":[]}"#,
+        ];
+        for document in invalid {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            assert!(request.prepare(true).is_err(), "{document}");
+        }
+    }
+
+    #[test]
+    fn validates_stack_merge_target() {
+        let invalid = [
+            r#"{"operation":"stack_merge","repository":"owner/repo"}"#,
+            r#"{"operation":"stack_merge","repository":"owner/repo","pull_request":2,"stack_number":1}"#,
+        ];
+        for document in invalid {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            assert!(request.prepare(true).is_err(), "{document}");
         }
     }
 

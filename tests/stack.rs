@@ -1,12 +1,11 @@
 #![cfg(unix)]
 
-use std::env;
 use std::ffi::OsString;
-use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
+use std::{env, fs};
 
 use serde_json::Value;
 use tempfile::TempDir;

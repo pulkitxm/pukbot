@@ -11,13 +11,12 @@ mod workflow;
 mod workflow_run;
 
 use std::collections::BTreeMap;
-use std::env;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, IsTerminal, Read, Write};
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use std::{fs, process};
+use std::{env, fs, process};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};

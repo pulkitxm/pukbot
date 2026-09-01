@@ -1,12 +1,11 @@
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::num::NonZeroU64;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt as _;
 use std::process::{Command, ExitStatus, Output, Stdio};
 use std::thread;
 use std::time::Duration;
-
-#[cfg(unix)]
-use std::os::unix::process::CommandExt as _;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};

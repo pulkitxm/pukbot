@@ -13,8 +13,9 @@ through the App! The CLI never receives the GitHub App private key or an
 installation token. A protected GitHub Actions environment mints a short-lived,
 repository-scoped token, performs the operation, and discards the token.
 
-Pull request operations run through your own authenticated GitHub CLI session
-instead, so GitHub records you as the pull request author. See
+Pull request and stack operations run through your own authenticated GitHub CLI
+session instead, so GitHub records you as the pull request author or stack
+actor. See
 [Attribution](#attribution).
 
 ## Install
@@ -165,17 +166,51 @@ pukbot capabilities --json
 
 Issue operations include create, edit, close, reopen, labels, assignees, and
 reactions. Pull request operations include create, edit, close, reopen,
-squash-merge, ready, draft, review, labels, assignees, reactions, and branch
-updates. Every mutation is also accepted by `pukbot apply` as typed JSON.
+squash-merge, ready, draft, review, labels, assignees, reactions, branch
+updates, and disabling auto-merge. Every mutation is also accepted by
+`pukbot apply` as typed JSON.
 
 ```bash
 pukbot issue create --repo owner/repository --title "bug" --label bug
 pukbot issue labels 123 --repo owner/repository --add urgent --remove stale
 pukbot pr review 456 --repo owner/repository --event approve --body "looks good"
 pukbot pr merge 456 --repo owner/repository --yes
+pukbot pr disable-auto-merge 456 --repo owner/repository
 pukbot pr create --repo owner/repository --title "automated update" \
   --head automation --base main --as-app
 ```
+
+Run the complete installed gh-stack extension through Pukbot, including local
+topology, interactive editors, navigation, submit, sync, link, and merge:
+
+```bash
+gh extension install github/gh-stack
+pukbot stack init feature-data feature-api feature-ui
+pukbot stack submit --auto
+pukbot stack sync
+pukbot stack merge --yes --squash
+```
+
+`pukbot stack` passes every argument, standard stream, terminal interaction,
+environment variable, working directory, and exit status through to
+`gh stack`. Run `pukbot stack --help` for the full extension command surface.
+
+Headless automation can use Pukbot's native stack API without local tracking:
+
+```bash
+pukbot stack-api list --repo owner/repository
+pukbot stack-api view 42 --repo owner/repository
+pukbot stack-api create 101 102 103 --repo owner/repository
+pukbot stack-api append 42 104 --repo owner/repository
+pukbot stack-api unstack 42 --repo owner/repository --yes
+pukbot stack-api merge 103 --repo owner/repository --yes
+```
+
+Create and append accept pull request numbers ordered from the bottom of the
+stack to the top. Direct stack merges always squash, include the current head
+SHA, and fail if repository rules require a merge queue. `pukbot pr merge`
+detects stacked pull requests and automatically uses the required asynchronous
+merge flow. The repository must have GitHub stacked pull requests enabled.
 
 Commit staged local changes atomically through the GitHub Git Data API. The
 requester is the author by default, while `--as-app` records Pukbot as both
@@ -283,6 +318,7 @@ result reports which:
 Authored by you, executed through your local authenticated GitHub CLI session:
 
 - every `pr` operation, including `create`, `review`, and `merge`
+- every proxied gh-stack command and every `stack-api` mutation
 
 The pull request author, the reviewer, the merge event, and the squash commit
 on the base branch are all yours, so the work lands in your GitHub

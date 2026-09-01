@@ -25,3 +25,9 @@ Verify the installation and install completions for the current shell:
 Check for a release update without replacing the executable:
 
     pukbot update --check
+
+Install the gh-stack extension to enable the complete `pukbot stack` command
+surface. The native `pukbot stack-api` commands do not require this extension:
+
+    gh extension install github/gh-stack
+    pukbot stack --version

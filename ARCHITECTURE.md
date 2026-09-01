@@ -7,9 +7,15 @@ The public Rust CLI validates typed input, resolves the authenticated GitHub
 CLI user, and routes the operation. It never receives the GitHub App private
 key or an installation token.
 
-Pull request operations execute locally through the authenticated GitHub CLI
-session, so GitHub records the user as the author, reviewer, merger, and
-author of the squash commit. No workflow runs and no App token is minted.
+By default, pull request and stack API operations execute locally through the
+authenticated GitHub CLI session, so GitHub records the user as the author,
+reviewer, merger, and author of the squash commit. No workflow runs and no App
+token is minted. `pukbot stack` preserves the complete installed gh-stack
+extension interface for local, interactive, and composite workflows.
+`pukbot stack-api` provides noninteractive create, append, unstack, inspection,
+and asynchronous merge through GitHub's native stack endpoints. Pull request
+merge checks stack membership and selects the asynchronous endpoint when
+needed.
 
 Comment, issue, commit, and workflow dispatch operations dispatch the
 repository's `operation.yml` workflow. The workflow reads the private key from

@@ -1,8 +1,9 @@
 # Operations
 
-Every Pukbot mutation has a command and a typed JSON operation. Commands are
-convenient for interactive use. `pukbot apply --input request.json --json` is
-the canonical agent interface.
+Every native Pukbot mutation has a command and a typed JSON operation. Commands
+are convenient for interactive use. `pukbot apply --input request.json --json`
+is the canonical agent interface. The `pukbot stack` compatibility surface is
+the documented exception because it forwards directly to gh-stack.
 
 ## Common contracts
 
@@ -13,7 +14,8 @@ the canonical agent interface.
   Markdown posted verbatim. See [Markdown bodies](#markdown-bodies).
 - `--dry-run` validates input and prints the final operation without dispatching.
 - `--json` emits one result object and suppresses workflow progress.
-- Destructive comment deletion and pull request merging require `--yes`.
+- Destructive comment deletion, `stack-api` removal, and pull request or
+  `stack-api` merging require `--yes`.
 - Pull request merges always use squash.
 - Every JSON object rejects unknown fields.
 
@@ -183,6 +185,7 @@ pukbot pr labels 123 --repo owner/repository --add ready --remove draft
 pukbot pr assignees 123 --repo owner/repository --add octocat
 pukbot pr react 123 --repo owner/repository --reaction heart
 pukbot pr update-branch 123 --repo owner/repository
+pukbot pr disable-auto-merge 123 --repo owner/repository
 pukbot pr merge 123 --repo owner/repository --yes
 pukbot pr create --repo owner/repository --title "automated update" \
   --head automation --base main --as-app
@@ -204,6 +207,7 @@ JSON operation names are:
 - `pull_request_assignees`
 - `pull_request_react`
 - `pull_request_update_branch`
+- `pull_request_disable_auto_merge`
 
 Create accepts `title`, optional `body`, `head`, `base`, and optional `draft`.
 Edit accepts `number` and at least one of `title`, `body`, or `base`. Review
@@ -222,6 +226,130 @@ message explicitly so GitHub does not add generated attribution trailers.
 
 Pull request descriptions and review bodies receive no disclosure footer. Task
 lists in a description feed the pull request task counter.
+
+When `pr merge` targets a stacked pull request, Pukbot detects its stack and
+uses GitHub's asynchronous merge API. The selected pull request and every
+unmerged pull request below it are merged atomically. Direct merges use squash.
+Pukbot requests a direct merge and fails if repository rules require a merge
+queue, because the queue cannot guarantee squash.
+
+## Stacked pull requests
+
+`pukbot stack` is a transparent entry point to the installed `gh stack`
+extension. Arguments, standard streams, terminal interaction, environment,
+working directory, and exit status pass through unchanged. Install the
+extension once on each machine:
+
+```bash
+gh extension install github/gh-stack
+pukbot stack --version
+```
+
+The complete extension surface is available:
+
+| Command | Operation |
+| --- | --- |
+| `stack init` | Create or adopt local branches as a stack. |
+| `stack add` | Add and optionally commit a new top branch. |
+| `stack view` | Display the current local stack, including JSON output. |
+| `stack checkout` | Find and check out a local or remote stack. |
+| `stack modify` | Restructure the current stack in the interactive editor. |
+| `stack unstack`, `stack delete` | Remove local tracking and optionally the GitHub stack. |
+| `stack link` | Push branches, create or find PRs, repair bases, and link the stack. |
+| `stack merge` | Select and asynchronously merge part or all of a stack. |
+| `stack push` | Push active branches with per-branch lease checks. |
+| `stack rebase` | Fetch and cascade rebases through a stack. |
+| `stack submit` | Push branches, create or update PRs, and link the stack. |
+| `stack sync` | Reconcile local branches, PR state, and the remote stack. |
+| `stack switch` | Select a branch from the current stack. |
+| `stack up`, `stack down` | Move through active stack branches. |
+| `stack top`, `stack bottom`, `stack trunk` | Jump to a stack boundary. |
+| `stack alias` | Create or remove a shell alias for `gh stack`. |
+| `stack feedback` | Open the extension feedback form. |
+
+For headless automation, Pukbot also exposes the native GitHub stack REST
+primitives under `stack-api` and as typed JSON operations. These commands do
+not depend on local gh-stack tracking:
+
+```bash
+pukbot stack-api list --repo owner/repository
+pukbot stack-api list --repo owner/repository --pull-request 102
+pukbot stack-api view 42 --repo owner/repository
+pukbot stack-api create 101 102 103 --repo owner/repository
+pukbot stack-api append 42 104 105 --repo owner/repository
+pukbot stack-api unstack 42 --repo owner/repository --yes
+pukbot stack-api merge 103 --repo owner/repository --yes
+pukbot stack-api merge --stack 42 --repo owner/repository --yes
+pukbot stack-api merge-status 103 630b9d5e-3f2a-4f7e-8b0c-2d5f9a8c1e42 \
+  --repo owner/repository
+```
+
+Create takes 2 to 100 unique pull request numbers. Append takes 1 to 100 unique
+pull request numbers. Both lists are ordered from the bottom of the new portion
+to its top. GitHub requires the pull requests to form a valid base-to-head
+chain. Create and append do not change pull request base branches, so use
+`pukbot pr edit NUMBER --base BRANCH` first when the chain needs correction.
+Disable auto-merge with `pukbot pr disable-auto-merge NUMBER` before stacking a
+pull request that has it enabled.
+
+The typed mutation requests are:
+
+```json
+{
+  "operation": "stack_create",
+  "repository": "owner/repository",
+  "pull_requests": [101, 102, 103]
+}
+```
+
+```json
+{
+  "operation": "stack_append",
+  "repository": "owner/repository",
+  "stack_number": 42,
+  "pull_requests": [104, 105]
+}
+```
+
+```json
+{
+  "operation": "stack_unstack",
+  "repository": "owner/repository",
+  "stack_number": 42
+}
+```
+
+```json
+{
+  "operation": "stack_merge",
+  "repository": "owner/repository",
+  "pull_request": 103
+}
+```
+
+`stack_merge` accepts exactly one of `pull_request` or `stack_number`. A pull
+request target merges through that layer. A stack target merges through its top
+layer. The command polls once per second for up to ten minutes and succeeds on
+`merged`. It sends the current head SHA, requires `squash` and `direct_merge` in
+every pending response, rejects an existing conflicting request, and rejects
+merge-queue admission. If execution is interrupted after GitHub returns a
+request UUID, `stack-api merge-status` can inspect that request for 24 hours.
+
+Unstacking removes every pull request GitHub permits it to remove. Merged,
+merging, queued, or otherwise locked pull requests can remain in the stack.
+Pull request base branches are unchanged. When no members remain, GitHub
+dissolves the stack.
+
+List, filtered list, view, and merge-status are read-only `stack-api` commands.
+With `--json`, stack resources use camel-case keys and preserve the stable
+GitHub fields: `id`, `number`, `nodeId`, `url`, `base`, `open`, `createdAt`, and
+`pullRequests`. Pull requests stay ordered from bottom to top.
+
+The repository must have GitHub stacked pull requests enabled. GitHub returns
+404 for the stack endpoints when the feature is unavailable. GitHub does not
+offer a server operation to reorder a stack, replace its members, or remove one
+selected pull request. Use `pukbot stack modify`, then submit the repaired
+topology, or unstack and recreate it.
 
 ## Batch issue and pull request mutations
 
@@ -411,12 +539,12 @@ Results report who GitHub records as the actor:
 }
 ```
 
-`authoredBy` is `user` for ordinary `pr` operations, which execute locally
-under the authenticated GitHub CLI session. It is `pukbot` for pull request
-create, edit, merge, review, and update-branch with `--as-app`, and for every
-`comment`, `issue`, `commit`, repository dispatch, and workflow mutation.
-App operations execute inside the protected workflow under a short-lived App
-installation token and carry a `workflowUrl`.
+`authoredBy` is `user` for ordinary `pr` operations and stack mutations, which
+execute locally under the authenticated GitHub CLI session. It is `pukbot` for
+pull request create, edit, merge, review, and update-branch with `--as-app`, and
+for every `comment`, `issue`, `commit`, repository dispatch, and workflow
+mutation. App operations execute inside the protected workflow under a
+short-lived App installation token and carry a `workflowUrl`.
 
 `pukbot capabilities --json` reports the same split under `attribution`.
 

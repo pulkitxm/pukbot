@@ -11,6 +11,8 @@ mod workflow;
 mod workflow_run;
 
 use std::collections::BTreeMap;
+use std::env;
+use std::ffi::{OsStr, OsString};
 use std::io::{self, IsTerminal, Read, Write};
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
@@ -76,9 +78,15 @@ enum Commands {
         #[command(subcommand)]
         command: PullRequestCommand,
     },
+    #[command(about = "Run the installed gh-stack extension")]
     Stack {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        arguments: Vec<OsString>,
+    },
+    #[command(name = "stack-api")]
+    StackApi {
         #[command(subcommand)]
-        command: StackCommand,
+        command: StackApiCommand,
     },
     Commit {
         #[command(subcommand)]
@@ -180,19 +188,29 @@ enum PullRequestCommand {
     Assignees(ListEditArgs),
     React(ReactArgs),
     UpdateBranch(PullRequestUpdateBranchArgs),
+    #[command(about = "Disable auto-merge for a pull request")]
     DisableAutoMerge(TargetArgs),
     Batch(BatchMutationArgs),
 }
 
 #[derive(Debug, Subcommand)]
-enum StackCommand {
+enum StackApiCommand {
+    #[command(about = "List GitHub pull request stacks")]
     List(StackListArgs),
+    #[command(about = "View one GitHub pull request stack")]
     View(StackViewArgs),
+    #[command(about = "Create a stack from pull requests ordered bottom to top")]
     Create(StackCreateArgs),
-    Add(StackAddArgs),
-    #[command(visible_alias = "delete")]
+    #[command(about = "Append pull requests to the top of a stack")]
+    Append(StackAppendArgs),
+    #[command(
+        visible_alias = "delete",
+        about = "Remove every eligible pull request from a stack"
+    )]
     Unstack(StackUnstackArgs),
+    #[command(about = "Squash-merge a stack through a pull request or its top")]
     Merge(StackMergeArgs),
+    #[command(about = "Read an asynchronous stack merge result")]
     MergeStatus(StackMergeStatusArgs),
 }
 
@@ -806,7 +824,7 @@ struct StackCreateArgs {
 }
 
 #[derive(Debug, Args)]
-struct StackAddArgs {
+struct StackAppendArgs {
     stack_number: NonZeroU64,
     #[arg(required = true, value_name = "PULL_REQUEST")]
     pull_requests: Vec<NonZeroU64>,
@@ -926,9 +944,31 @@ struct Markdown {
 }
 
 fn main() {
+    if let Some(arguments) = raw_stack_arguments() {
+        exit_with_stack_extension(arguments);
+    }
     if let Err(error) = run() {
         drop(writeln!(io::stderr().lock(), "error: {error:#}"));
         process::exit(1);
+    }
+}
+
+fn raw_stack_arguments() -> Option<Vec<OsString>> {
+    let mut arguments = env::args_os();
+    arguments.next()?;
+    if arguments.next()?.as_os_str() != OsStr::new("stack") {
+        return None;
+    }
+    Some(arguments.collect())
+}
+
+fn exit_with_stack_extension(arguments: Vec<OsString>) -> ! {
+    match stack::run_extension(arguments) {
+        Ok(status) => process::exit(stack::extension_exit_code(status)),
+        Err(error) => {
+            drop(writeln!(io::stderr().lock(), "error: {error:#}"));
+            process::exit(1);
+        }
     }
 }
 
@@ -942,7 +982,8 @@ fn run() -> Result<()> {
         Commands::Comment { command } => run_comment(command, cli.json),
         Commands::Issue { command } => run_issue(command, cli.json),
         Commands::Pr { command } => run_pull_request(command, cli.json),
-        Commands::Stack { command } => run_stack(command, cli.json),
+        Commands::Stack { arguments } => exit_with_stack_extension(arguments),
+        Commands::StackApi { command } => run_stack_api(command, cli.json),
         Commands::Commit { command } => run_commit(command, cli.json),
         Commands::Wiki { command } => run_wiki(command, cli.json),
         Commands::Repository { command } => run_repository(command, cli.json),
@@ -1235,21 +1276,27 @@ fn run_pull_request(command: PullRequestCommand, json: bool) -> Result<()> {
             args.target.dry_run,
             json,
         ),
-        PullRequestCommand::DisableAutoMerge(args) => execute(
-            Request::PullRequestDisableAutoMerge {
-                repository: args.repo,
-                number: args.number,
-            },
-            args.dry_run,
-            json,
-        ),
+        PullRequestCommand::DisableAutoMerge(args) => {
+            execute_pull_request_disable_auto_merge(args, json)
+        }
         PullRequestCommand::Batch(args) => execute_batch(args, json, true),
     }
 }
 
-fn run_stack(command: StackCommand, json: bool) -> Result<()> {
+fn execute_pull_request_disable_auto_merge(args: TargetArgs, json: bool) -> Result<()> {
+    execute(
+        Request::PullRequestDisableAutoMerge {
+            repository: args.repo,
+            number: args.number,
+        },
+        args.dry_run,
+        json,
+    )
+}
+
+fn run_stack_api(command: StackApiCommand, json: bool) -> Result<()> {
     match command {
-        StackCommand::List(args) => {
+        StackApiCommand::List(args) => {
             let stacks = stack::list(&args.repo, args.pull_request)?;
             if json {
                 emit_json(&stacks)
@@ -1257,7 +1304,7 @@ fn run_stack(command: StackCommand, json: bool) -> Result<()> {
                 stack::emit_list(&stacks)
             }
         }
-        StackCommand::View(args) => {
+        StackApiCommand::View(args) => {
             let stack = stack::get(&args.repo, args.stack_number)?;
             if json {
                 emit_json(&stack)
@@ -1265,7 +1312,7 @@ fn run_stack(command: StackCommand, json: bool) -> Result<()> {
                 stack::emit_stack(&stack)
             }
         }
-        StackCommand::Create(args) => execute(
+        StackApiCommand::Create(args) => execute(
             Request::StackCreate {
                 repository: args.repo,
                 pull_requests: args.pull_requests,
@@ -1273,8 +1320,8 @@ fn run_stack(command: StackCommand, json: bool) -> Result<()> {
             args.dry_run,
             json,
         ),
-        StackCommand::Add(args) => execute(
-            Request::StackAdd {
+        StackApiCommand::Append(args) => execute(
+            Request::StackAppend {
                 repository: args.repo,
                 stack_number: args.stack_number,
                 pull_requests: args.pull_requests,
@@ -1282,7 +1329,7 @@ fn run_stack(command: StackCommand, json: bool) -> Result<()> {
             args.dry_run,
             json,
         ),
-        StackCommand::Unstack(args) => {
+        StackApiCommand::Unstack(args) => {
             if !args.yes && !args.dry_run {
                 bail!("stack unstack requires --yes");
             }
@@ -1295,7 +1342,7 @@ fn run_stack(command: StackCommand, json: bool) -> Result<()> {
                 json,
             )
         }
-        StackCommand::Merge(args) => {
+        StackApiCommand::Merge(args) => {
             if !args.yes && !args.dry_run {
                 bail!("stack merge requires --yes");
             }
@@ -1309,7 +1356,7 @@ fn run_stack(command: StackCommand, json: bool) -> Result<()> {
                 json,
             )
         }
-        StackCommand::MergeStatus(args) => {
+        StackApiCommand::MergeStatus(args) => {
             let status = stack::merge_status(&args.repo, args.pull_request, &args.uuid)?;
             if json {
                 emit_json(&status)
@@ -1942,13 +1989,34 @@ fn capabilities() -> Capabilities {
             "pr.update-branch",
             "pr.disable-auto-merge",
             "pr.batch",
-            "stack.list",
-            "stack.view",
-            "stack.create",
+            "stack.init",
             "stack.add",
+            "stack.view",
+            "stack.checkout",
+            "stack.modify",
             "stack.unstack",
+            "stack.delete",
+            "stack.link",
             "stack.merge",
-            "stack.merge-status",
+            "stack.push",
+            "stack.rebase",
+            "stack.submit",
+            "stack.sync",
+            "stack.switch",
+            "stack.up",
+            "stack.down",
+            "stack.top",
+            "stack.bottom",
+            "stack.trunk",
+            "stack.alias",
+            "stack.feedback",
+            "stack-api.list",
+            "stack-api.view",
+            "stack-api.create",
+            "stack-api.append",
+            "stack-api.unstack",
+            "stack-api.merge",
+            "stack-api.merge-status",
             "commit.create",
             "wiki.publish",
             "repository.dispatch",
@@ -1998,10 +2066,30 @@ fn attribution_capabilities() -> Attribution {
             "pr.react",
             "pr.update-branch",
             "pr.disable-auto-merge",
-            "stack.create",
+            "stack.init",
             "stack.add",
+            "stack.checkout",
+            "stack.modify",
             "stack.unstack",
+            "stack.delete",
+            "stack.link",
             "stack.merge",
+            "stack.push",
+            "stack.rebase",
+            "stack.submit",
+            "stack.sync",
+            "stack.switch",
+            "stack.up",
+            "stack.down",
+            "stack.top",
+            "stack.bottom",
+            "stack.trunk",
+            "stack.alias",
+            "stack.feedback",
+            "stack-api.create",
+            "stack-api.append",
+            "stack-api.unstack",
+            "stack-api.merge",
         ],
         app: vec![
             "comment.create",
@@ -2042,9 +2130,10 @@ fn attribution_capabilities() -> Attribution {
             "workflow.disable",
         ],
         read_only: vec![
-            "stack.list",
             "stack.view",
-            "stack.merge-status",
+            "stack-api.list",
+            "stack-api.view",
+            "stack-api.merge-status",
             "workflow.status",
             "workflow.watch",
             "workflow.logs",
@@ -2108,9 +2197,75 @@ fn markdown_capabilities() -> Markdown {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU64;
     use std::path::Path;
 
-    use super::{parse_workflow_inputs, read_client_payload};
+    use clap::Parser;
+
+    use super::{
+        Cli, Commands, StackApiCommand, capabilities, parse_workflow_inputs, read_client_payload,
+    };
+
+    #[test]
+    fn parses_stack_merge_by_stack_number() {
+        let cli = Cli::try_parse_from([
+            "pukbot",
+            "stack-api",
+            "merge",
+            "--stack",
+            "42",
+            "--repo",
+            "owner/repo",
+            "--yes",
+        ])
+        .expect("stack merge should parse");
+        let Commands::StackApi {
+            command: StackApiCommand::Merge(args),
+        } = cli.command
+        else {
+            panic!("unexpected command");
+        };
+        assert_eq!(args.stack.map(NonZeroU64::get), Some(42));
+        assert!(args.pull_request.is_none());
+        assert!(args.yes);
+    }
+
+    #[test]
+    fn publishes_every_stack_capability() {
+        let commands = capabilities().commands;
+        for command in [
+            "stack.init",
+            "stack.add",
+            "stack.view",
+            "stack.checkout",
+            "stack.modify",
+            "stack.unstack",
+            "stack.delete",
+            "stack.link",
+            "stack.merge",
+            "stack.push",
+            "stack.rebase",
+            "stack.submit",
+            "stack.sync",
+            "stack.switch",
+            "stack.up",
+            "stack.down",
+            "stack.top",
+            "stack.bottom",
+            "stack.trunk",
+            "stack.alias",
+            "stack.feedback",
+            "stack-api.list",
+            "stack-api.view",
+            "stack-api.create",
+            "stack-api.append",
+            "stack-api.unstack",
+            "stack-api.merge",
+            "stack-api.merge-status",
+        ] {
+            assert!(commands.contains(&command), "{command}");
+        }
+    }
 
     #[test]
     fn parses_workflow_inputs_at_first_equals_sign() {

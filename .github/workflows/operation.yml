@@ -303,28 +303,42 @@ jobs:
                   '{merge_method: "squash", commit_title: $title, commit_message: ""}' >request.json
                 gh api --method PUT "repos/${slug}/pulls/${number}/merge" --input request.json >/dev/null
               else
-                jq -n '{merge_method: "squash", merge_action: "default"}' >request.json
+                head_sha=$(jq -er '.head.sha | select(test("^[A-Fa-f0-9]{1,128}$"))' \
+                  <<<"${pull_request}")
+                jq -n --arg sha "${head_sha}" \
+                  '{merge_method: "squash", merge_action: "direct_merge", sha: $sha}' >request.json
                 set +e
                 merge=$(gh api --method PUT "repos/${slug}/pulls/${number}/merge-async" \
                   --input request.json 2>merge-error.txt)
                 merge_exit=$?
                 set -e
                 if [ "${merge_exit}" -ne 0 ] && ! jq -e \
-                  '.status == "pending" or .status == "failed"' <<<"${merge}" >/dev/null 2>&1; then
+                  '.status == "failed"' <<<"${merge}" >/dev/null 2>&1; then
                   cat merge-error.txt >&2
                   exit "${merge_exit}"
                 fi
                 for _ in $(seq 1 600); do
                   merge_status=$(jq -er '.status' <<<"${merge}")
                   case "${merge_status}" in
-                    merged | enqueued) break ;;
+                    merged) break ;;
+                    enqueued)
+                      printf 'stack merge was enqueued instead of squash-merged\n' >&2
+                      exit 1
+                      ;;
                     failed)
                       jq -r '.details.message // "stack merge failed"' <<<"${merge}" >&2
                       exit 1
                       ;;
                     pending)
-                      merge_uuid=$(jq -er '.details.uuid | select(test("^[A-Za-z0-9-]{1,128}$"))' \
-                        <<<"${merge}")
+                      merge_uuid=$(jq -er --arg sha "${head_sha}" \
+                        '.details
+                        | select(
+                            .merge_method == "squash"
+                            and .merge_action == "direct_merge"
+                            and .expected_head_sha == $sha
+                          )
+                        | .uuid
+                        | select(test("^[A-Za-z0-9-]{1,128}$"))' <<<"${merge}")
                       sleep 1
                       merge=$(gh api \
                         "repos/${slug}/pulls/${number}/merge-async/${merge_uuid}")
@@ -335,10 +349,29 @@ jobs:
                       ;;
                   esac
                 done
-                if [ "$(jq -r '.status' <<<"${merge}")" = pending ]; then
-                  printf 'stack merge is still pending after 10 minutes\n' >&2
-                  exit 1
-                fi
+                merge_status=$(jq -er '.status' <<<"${merge}")
+                case "${merge_status}" in
+                  merged)
+                    jq -er '.details.sha | select(test("^[A-Fa-f0-9]{1,128}$"))' \
+                      <<<"${merge}" >/dev/null
+                    ;;
+                  enqueued)
+                    printf 'stack merge was enqueued instead of squash-merged\n' >&2
+                    exit 1
+                    ;;
+                  failed)
+                    jq -r '.details.message // "stack merge failed"' <<<"${merge}" >&2
+                    exit 1
+                    ;;
+                  pending)
+                    printf 'stack merge is still pending after 10 minutes\n' >&2
+                    exit 1
+                    ;;
+                  *)
+                    printf 'unknown stack merge status: %s\n' "${merge_status}" >&2
+                    exit 1
+                    ;;
+                esac
               fi
               result="https://github.com/${slug}/pull/${number}"
               ;;

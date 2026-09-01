@@ -1,8 +1,12 @@
+use std::ffi::OsString;
 use std::io::{self, Write};
 use std::num::NonZeroU64;
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, ExitStatus, Output, Stdio};
 use std::thread;
 use std::time::Duration;
+
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -11,6 +15,27 @@ use serde_json::{Value, json};
 use crate::model::{Operation, Repository};
 
 const MERGE_POLL_ATTEMPTS: usize = 600;
+
+pub fn run_extension(arguments: Vec<OsString>) -> Result<ExitStatus> {
+    Command::new("gh")
+        .arg("stack")
+        .args(arguments)
+        .status()
+        .context(
+            "failed to launch gh-stack; install GitHub CLI and run `gh extension install github/gh-stack`",
+        )
+}
+
+pub fn extension_exit_code(status: ExitStatus) -> i32 {
+    if let Some(code) = status.code() {
+        return code;
+    }
+    #[cfg(unix)]
+    if let Some(signal) = status.signal() {
+        return 128 + signal;
+    }
+    1
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
@@ -77,6 +102,12 @@ pub struct AsyncMergeDetails {
 struct PullRequestResource {
     #[serde(default)]
     stack: Option<Value>,
+    head: PullRequestHeadResource,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestHeadResource {
+    sha: String,
 }
 
 pub fn list(repository: &Repository, pull_request: Option<NonZeroU64>) -> Result<Vec<RemoteStack>> {
@@ -169,7 +200,7 @@ pub fn execute(operation: &Operation) -> Result<String> {
             )?;
             Ok(stack_result_url(owner, repository, &remote))
         }
-        Operation::StackAdd {
+        Operation::StackAppend {
             owner,
             repository,
             stack_number,
@@ -217,10 +248,18 @@ pub fn execute(operation: &Operation) -> Result<String> {
     }
 }
 
-pub fn is_stacked(owner: &str, repository: &str, pull_request: NonZeroU64) -> Result<bool> {
+pub fn stacked_head_sha(
+    owner: &str,
+    repository: &str,
+    pull_request: NonZeroU64,
+) -> Result<Option<String>> {
     let path = format!("repos/{owner}/{repository}/pulls/{pull_request}");
     let resource = api_json::<PullRequestResource>("GET", &path, None)?;
-    Ok(resource.stack.is_some())
+    if resource.stack.is_none() {
+        return Ok(None);
+    }
+    validate_head_sha(&resource.head.sha)?;
+    Ok(Some(resource.head.sha))
 }
 
 pub fn merge_pull_request(
@@ -228,19 +267,37 @@ pub fn merge_pull_request(
     repository: &str,
     pull_request: NonZeroU64,
 ) -> Result<String> {
+    let head_sha = stacked_head_sha(owner, repository, pull_request)?
+        .with_context(|| format!("pull request #{pull_request} is not part of a stack"))?;
+    merge_known_stack_pull_request(owner, repository, pull_request, &head_sha)
+}
+
+pub fn merge_known_stack_pull_request(
+    owner: &str,
+    repository: &str,
+    pull_request: NonZeroU64,
+    head_sha: &str,
+) -> Result<String> {
+    validate_head_sha(head_sha)?;
     let path = format!("repos/{owner}/{repository}/pulls/{pull_request}/merge-async");
     let mut result = merge_request(
         "PUT",
         &path,
-        Some(&json!({"merge_method": "squash", "merge_action": "default"})),
+        Some(&json!({
+            "merge_method": "squash",
+            "merge_action": "direct_merge",
+            "sha": head_sha
+        })),
     )?;
     for attempt in 0..=MERGE_POLL_ATTEMPTS {
         match result.status.as_str() {
-            "merged" | "enqueued" => {
+            "merged" => {
+                validate_merged_result(&result)?;
                 return Ok(format!(
                     "https://github.com/{owner}/{repository}/pull/{pull_request}"
                 ));
             }
+            "enqueued" => bail!("stack merge was enqueued instead of squash-merged"),
             "failed" => {
                 let message = result.details.message.trim();
                 if message.is_empty() {
@@ -252,12 +309,7 @@ pub fn merge_pull_request(
                 if attempt == MERGE_POLL_ATTEMPTS {
                     bail!("stack merge is still pending after 10 minutes");
                 }
-                let uuid = result
-                    .details
-                    .uuid
-                    .as_deref()
-                    .context("pending stack merge response omitted its UUID")?;
-                validate_uuid(uuid)?;
+                let uuid = validate_pending_result(&result, head_sha)?;
                 thread::sleep(Duration::from_secs(1));
                 result = merge_status_parts(owner, repository, pull_request, uuid)?;
             }
@@ -319,10 +371,10 @@ fn merge_request(method: &str, path: &str, request: Option<&Value>) -> Result<As
         return serde_json::from_slice(&output.stdout)
             .with_context(|| format!("failed to decode GitHub response for {method} {path}"));
     }
-    if let Ok(result) = serde_json::from_slice::<AsyncMergeResult>(&output.stdout)
-        && matches!(result.status.as_str(), "pending" | "failed")
-    {
-        return Ok(result);
+    if let Ok(result) = serde_json::from_slice::<AsyncMergeResult>(&output.stdout) {
+        if result.status == "failed" {
+            return Ok(result);
+        }
     }
     ensure_success(method, path, &output)?;
     unreachable!()
@@ -388,6 +440,44 @@ fn validate_uuid(uuid: &str) -> Result<()> {
         bail!("stack merge UUID is invalid");
     }
     Ok(())
+}
+
+fn validate_head_sha(sha: &str) -> Result<()> {
+    if sha.is_empty()
+        || sha.len() > 128
+        || !sha.chars().all(|character| character.is_ascii_hexdigit())
+    {
+        bail!("pull request head SHA is invalid");
+    }
+    Ok(())
+}
+
+fn validate_pending_result<'a>(result: &'a AsyncMergeResult, head_sha: &str) -> Result<&'a str> {
+    if result.details.merge_method.as_deref() != Some("squash") {
+        bail!("pending stack merge is not using squash");
+    }
+    if result.details.merge_action.as_deref() != Some("direct_merge") {
+        bail!("pending stack merge is not using a direct merge");
+    }
+    if result.details.expected_head_sha.as_deref() != Some(head_sha) {
+        bail!("pending stack merge targets a different pull request head");
+    }
+    let uuid = result
+        .details
+        .uuid
+        .as_deref()
+        .context("pending stack merge response omitted its UUID")?;
+    validate_uuid(uuid)?;
+    Ok(uuid)
+}
+
+fn validate_merged_result(result: &AsyncMergeResult) -> Result<()> {
+    let sha = result
+        .details
+        .sha
+        .as_deref()
+        .context("merged stack response omitted its commit SHA")?;
+    validate_head_sha(sha)
 }
 
 #[cfg(test)]

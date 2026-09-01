@@ -20,10 +20,10 @@ pub fn runs_locally(operation: &Operation) -> bool {
         | Operation::PullRequestDraft { .. }
         | Operation::PullRequestLabels { .. }
         | Operation::PullRequestAssignees { .. }
-        | Operation::PullRequestReact { .. } => true,
-        Operation::PullRequestDisableAutoMerge { .. }
+        | Operation::PullRequestReact { .. }
+        | Operation::PullRequestDisableAutoMerge { .. }
         | Operation::StackCreate { .. }
-        | Operation::StackAdd { .. }
+        | Operation::StackAppend { .. }
         | Operation::StackUnstack { .. }
         | Operation::StackMerge { .. } => true,
         _ => false,
@@ -105,8 +105,10 @@ pub fn execute(operation: &Operation) -> Result<String> {
             number,
             as_app: _,
         } => {
-            if stack::is_stacked(owner, repository, *number)? {
-                return stack::merge_pull_request(owner, repository, *number);
+            if let Some(head_sha) = stack::stacked_head_sha(owner, repository, *number)? {
+                return stack::merge_known_stack_pull_request(
+                    owner, repository, *number, &head_sha,
+                );
             }
             let slug = slug(owner, repository);
             let path = format!("repos/{slug}/pulls/{number}");
@@ -235,7 +237,7 @@ pub fn execute(operation: &Operation) -> Result<String> {
             number,
         } => disable_auto_merge(owner, repository, number.get()),
         Operation::StackCreate { .. }
-        | Operation::StackAdd { .. }
+        | Operation::StackAppend { .. }
         | Operation::StackUnstack { .. }
         | Operation::StackMerge { .. } => stack::execute(operation),
         _ => bail!(
@@ -422,6 +424,21 @@ mod tests {
                 serde_json::from_str::<Request>(&app_document).expect("request should parse");
             let operation = request.prepare(true).expect("request should prepare");
             assert!(!runs_locally(&operation));
+        }
+    }
+
+    #[test]
+    fn routes_stack_mutations_locally() {
+        let documents = [
+            r#"{"operation":"stack_create","repository":"owner/repo","pull_requests":[1,2]}"#,
+            r#"{"operation":"stack_append","repository":"owner/repo","stack_number":1,"pull_requests":[3]}"#,
+            r#"{"operation":"stack_unstack","repository":"owner/repo","stack_number":1}"#,
+            r#"{"operation":"stack_merge","repository":"owner/repo","pull_request":2}"#,
+        ];
+        for document in documents {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            let operation = request.prepare(true).expect("request should prepare");
+            assert!(runs_locally(&operation));
         }
     }
 }

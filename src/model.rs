@@ -362,7 +362,7 @@ pub enum Request {
         repository: Repository,
         pull_requests: Vec<NonZeroU64>,
     },
-    StackAdd {
+    StackAppend {
         repository: Repository,
         stack_number: NonZeroU64,
         pull_requests: Vec<NonZeroU64>,
@@ -841,13 +841,13 @@ impl Request {
                     pull_requests,
                 })
             }
-            Self::StackAdd {
+            Self::StackAppend {
                 repository,
                 stack_number,
                 pull_requests,
             } => {
                 validate_stack_pull_requests(&pull_requests, 1)?;
-                Ok(Operation::StackAdd {
+                Ok(Operation::StackAppend {
                     owner: repository.owner,
                     repository: repository.name,
                     stack_number,
@@ -1388,7 +1388,7 @@ pub enum Operation {
         repository: String,
         pull_requests: Vec<NonZeroU64>,
     },
-    StackAdd {
+    StackAppend {
         owner: String,
         repository: String,
         stack_number: NonZeroU64,
@@ -1575,7 +1575,7 @@ impl Operation {
             Self::PullRequestDisableAutoMerge { .. } => "pull_request_disable_auto_merge",
             Self::PullRequestBatch { .. } => "pull_request_batch",
             Self::StackCreate { .. } => "stack_create",
-            Self::StackAdd { .. } => "stack_add",
+            Self::StackAppend { .. } => "stack_append",
             Self::StackUnstack { .. } => "stack_unstack",
             Self::StackMerge { .. } => "stack_merge",
             Self::CommitCreate { .. } => "commit_create",
@@ -2432,7 +2432,7 @@ mod tests {
             r#"{"operation":"pull_request_disable_auto_merge","repository":"owner/repo","number":1}"#,
             r#"{"operation":"pull_request_batch","repository":"owner/repo","numbers":[3,4],"remove_labels":["batch"],"lock":true,"lock_reason":"resolved","allow_partial":true}"#,
             r#"{"operation":"stack_create","repository":"owner/repo","pull_requests":[1,2]}"#,
-            r#"{"operation":"stack_add","repository":"owner/repo","stack_number":1,"pull_requests":[3]}"#,
+            r#"{"operation":"stack_append","repository":"owner/repo","stack_number":1,"pull_requests":[3]}"#,
             r#"{"operation":"stack_unstack","repository":"owner/repo","stack_number":1}"#,
             r#"{"operation":"stack_merge","repository":"owner/repo","pull_request":2}"#,
             r#"{"operation":"stack_merge","repository":"owner/repo","stack_number":1}"#,
@@ -2468,12 +2468,19 @@ mod tests {
         let invalid = [
             r#"{"operation":"stack_create","repository":"owner/repo","pull_requests":[1]}"#,
             r#"{"operation":"stack_create","repository":"owner/repo","pull_requests":[1,1]}"#,
-            r#"{"operation":"stack_add","repository":"owner/repo","stack_number":1,"pull_requests":[]}"#,
+            r#"{"operation":"stack_append","repository":"owner/repo","stack_number":1,"pull_requests":[]}"#,
         ];
         for document in invalid {
             let request = serde_json::from_str::<Request>(document).expect("request should parse");
             assert!(request.prepare(true).is_err(), "{document}");
         }
+        let request = serde_json::from_value::<Request>(serde_json::json!({
+            "operation": "stack_create",
+            "repository": "owner/repo",
+            "pull_requests": (1..=101).collect::<Vec<_>>()
+        }))
+        .expect("request should parse");
+        assert!(request.prepare(true).is_err());
     }
 
     #[test]

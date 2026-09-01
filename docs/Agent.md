@@ -4,9 +4,9 @@ Pukbot is designed so agents can perform approved GitHub mutations without
 reading the GitHub App private key or its installation token. For comment,
 issue, commit, repository dispatch, and workflow mutation operations the agent
 invokes the public CLI, the CLI dispatches a protected workflow, and the
-workflow mints one short-lived token scoped to one repository. Pull request
-operations run through the user's own authenticated GitHub CLI session so the
-user, not the App, is the author.
+workflow mints one short-lived token scoped to one repository. Pull request and
+stack operations run through the user's own authenticated GitHub CLI session
+so the user, not the App, is the author.
 
 Add this policy to `AGENTS.md`:
 
@@ -31,9 +31,20 @@ The stable agent sequence is:
 4. Run `pukbot apply --input request.json --json` to execute it.
 5. Read `resourceUrl` and `authoredBy` from the one JSON result object.
 
-`authoredBy` is `user` for locally executed pull request operations and
-`pukbot` for App operations. `workflowUrl` is `null` when no workflow runs.
+`authoredBy` is `user` for locally executed pull request and stack operations
+and `pukbot` for App operations. `workflowUrl` is `null` when no workflow runs.
 `pukbot capabilities --json` reports the split under `attribution`.
+
+For stacked pull requests, `pukbot stack` exposes the installed gh-stack
+command surface with the current working directory, terminal, and exit status
+intact. Its merge command is the squash-only exception and uses Pukbot's direct
+merge API. For deterministic agent mutations, use Git for pushes and local
+topology, then use Pukbot's typed operations. Create or edit the pull requests
+first, disable auto-merge where necessary, and call `stack_create` or
+`stack_append` with pull request numbers ordered bottom to top. Use
+`stack_merge` instead of an ordinary GitHub merge command. Pukbot's existing
+`pull_request_merge` operation also detects stack membership and selects the
+asynchronous squash flow automatically.
 
 Unknown JSON fields fail validation. Failed workflows return a nonzero exit
 code and print failed job logs. Text progress is suppressed when `--json` is

@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
 use crate::model::{Operation, Reaction, ReviewEvent};
+use crate::stack;
 
 pub fn runs_locally(operation: &Operation) -> bool {
     match operation {
@@ -19,7 +20,12 @@ pub fn runs_locally(operation: &Operation) -> bool {
         | Operation::PullRequestDraft { .. }
         | Operation::PullRequestLabels { .. }
         | Operation::PullRequestAssignees { .. }
-        | Operation::PullRequestReact { .. } => true,
+        | Operation::PullRequestReact { .. }
+        | Operation::PullRequestDisableAutoMerge { .. }
+        | Operation::StackCreate { .. }
+        | Operation::StackAppend { .. }
+        | Operation::StackUnstack { .. }
+        | Operation::StackMerge { .. } => true,
         _ => false,
     }
 }
@@ -99,6 +105,11 @@ pub fn execute(operation: &Operation) -> Result<String> {
             number,
             as_app: _,
         } => {
+            if let Some(head_sha) = stack::stacked_head_sha(owner, repository, *number)? {
+                return stack::merge_known_stack_pull_request(
+                    owner, repository, *number, &head_sha,
+                );
+            }
             let slug = slug(owner, repository);
             let path = format!("repos/{slug}/pulls/{number}");
             let title = api("GET", &path, None, Some(".title"))?;
@@ -220,11 +231,42 @@ pub fn execute(operation: &Operation) -> Result<String> {
             )?;
             Ok(pull_request_url(&slug, number.get()))
         }
+        Operation::PullRequestDisableAutoMerge {
+            owner,
+            repository,
+            number,
+        } => disable_auto_merge(owner, repository, number.get()),
+        Operation::StackCreate { .. }
+        | Operation::StackAppend { .. }
+        | Operation::StackUnstack { .. }
+        | Operation::StackMerge { .. } => stack::execute(operation),
         _ => bail!(
             "operation {} is executed by the Pukbot GitHub App",
             operation.name()
         ),
     }
+}
+
+fn disable_auto_merge(owner: &str, repository: &str, number: u64) -> Result<String> {
+    let slug = slug(owner, repository);
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "merge",
+            &number.to_string(),
+            "--repo",
+            &slug,
+            "--disable-auto",
+        ])
+        .output()
+        .context("failed to launch gh; install and authenticate GitHub CLI")?;
+    if !output.status.success() {
+        bail!(
+            "GitHub rejected the auto-merge change: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(pull_request_url(&slug, number))
 }
 
 fn set_draft(owner: &str, repository: &str, number: u64, draft: bool) -> Result<String> {
@@ -382,6 +424,21 @@ mod tests {
                 serde_json::from_str::<Request>(&app_document).expect("request should parse");
             let operation = request.prepare(true).expect("request should prepare");
             assert!(!runs_locally(&operation));
+        }
+    }
+
+    #[test]
+    fn routes_stack_mutations_locally() {
+        let documents = [
+            r#"{"operation":"stack_create","repository":"owner/repo","pull_requests":[1,2]}"#,
+            r#"{"operation":"stack_append","repository":"owner/repo","stack_number":1,"pull_requests":[3]}"#,
+            r#"{"operation":"stack_unstack","repository":"owner/repo","stack_number":1}"#,
+            r#"{"operation":"stack_merge","repository":"owner/repo","pull_request":2}"#,
+        ];
+        for document in documents {
+            let request = serde_json::from_str::<Request>(document).expect("request should parse");
+            let operation = request.prepare(true).expect("request should prepare");
+            assert!(runs_locally(&operation));
         }
     }
 }

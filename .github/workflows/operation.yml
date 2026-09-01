@@ -294,11 +294,85 @@ jobs:
             pull_request_merge)
               test "$(jq -r '.as_app' payload.json)" = true
               number=$(jq -er '.number | select(. >= 1)' payload.json)
-              title=$(gh api "repos/${slug}/pulls/${number}" --jq .title)
-              commit_title="${title} (#${number})"
-              jq -n --arg title "${commit_title}" \
-                '{merge_method: "squash", commit_title: $title, commit_message: ""}' >request.json
-              gh api --method PUT "repos/${slug}/pulls/${number}/merge" --input request.json >/dev/null
+              pull_request=$(gh api "repos/${slug}/pulls/${number}")
+              stack_number=$(jq -r '.stack.number // empty' <<<"${pull_request}")
+              if [ -z "${stack_number}" ]; then
+                title=$(jq -r .title <<<"${pull_request}")
+                commit_title="${title} (#${number})"
+                jq -n --arg title "${commit_title}" \
+                  '{merge_method: "squash", commit_title: $title, commit_message: ""}' >request.json
+                gh api --method PUT "repos/${slug}/pulls/${number}/merge" --input request.json >/dev/null
+              else
+                head_sha=$(jq -er '.head.sha | select(test("^[A-Fa-f0-9]{1,128}$"))' \
+                  <<<"${pull_request}")
+                jq -n --arg sha "${head_sha}" \
+                  '{merge_method: "squash", merge_action: "direct_merge", sha: $sha}' >request.json
+                set +e
+                merge=$(gh api --method PUT "repos/${slug}/pulls/${number}/merge-async" \
+                  --input request.json 2>merge-error.txt)
+                merge_exit=$?
+                set -e
+                if [ "${merge_exit}" -ne 0 ] && ! jq -e \
+                  '.status == "failed"' <<<"${merge}" >/dev/null 2>&1; then
+                  cat merge-error.txt >&2
+                  exit "${merge_exit}"
+                fi
+                for _ in $(seq 1 600); do
+                  merge_status=$(jq -er '.status' <<<"${merge}")
+                  case "${merge_status}" in
+                    merged) break ;;
+                    enqueued)
+                      printf 'stack merge was enqueued instead of squash-merged\n' >&2
+                      exit 1
+                      ;;
+                    failed)
+                      jq -r '.details.message // "stack merge failed"' <<<"${merge}" >&2
+                      exit 1
+                      ;;
+                    pending)
+                      merge_uuid=$(jq -er --arg sha "${head_sha}" \
+                        '.details
+                        | select(
+                            .merge_method == "squash"
+                            and .merge_action == "direct_merge"
+                            and .expected_head_sha == $sha
+                          )
+                        | .uuid
+                        | select(test("^[A-Za-z0-9-]{1,128}$"))' <<<"${merge}")
+                      sleep 1
+                      merge=$(gh api \
+                        "repos/${slug}/pulls/${number}/merge-async/${merge_uuid}")
+                      ;;
+                    *)
+                      printf 'unknown stack merge status: %s\n' "${merge_status}" >&2
+                      exit 1
+                      ;;
+                  esac
+                done
+                merge_status=$(jq -er '.status' <<<"${merge}")
+                case "${merge_status}" in
+                  merged)
+                    jq -er '.details.sha | select(test("^[A-Fa-f0-9]{1,128}$"))' \
+                      <<<"${merge}" >/dev/null
+                    ;;
+                  enqueued)
+                    printf 'stack merge was enqueued instead of squash-merged\n' >&2
+                    exit 1
+                    ;;
+                  failed)
+                    jq -r '.details.message // "stack merge failed"' <<<"${merge}" >&2
+                    exit 1
+                    ;;
+                  pending)
+                    printf 'stack merge is still pending after 10 minutes\n' >&2
+                    exit 1
+                    ;;
+                  *)
+                    printf 'unknown stack merge status: %s\n' "${merge_status}" >&2
+                    exit 1
+                    ;;
+                esac
+              fi
               result="https://github.com/${slug}/pull/${number}"
               ;;
             pull_request_review)

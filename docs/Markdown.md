@@ -152,7 +152,7 @@ Markdown inside is not rendered.
 ```
 
 Prefer Pukbot media placeholders over hand written image Markdown when the file
-is local. See [Operations](Operations.md).
+is local. An attached video renders as a player rather than a link. See [Operations](Operations.md).
 
 ### References and mentions
 

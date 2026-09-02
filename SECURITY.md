@@ -25,10 +25,13 @@ The CLI invokes GitHub CLI directly with argument arrays. It does not read or
 store the Pukbot App private key, installation tokens, or crates.io publishing
 credentials.
 
-Local media is limited to 100 MiB, checked against an explicit extension list,
-assigned a content-derived filename, and uploaded through the authenticated
-GitHub CLI session to the public `comment-assets` prerelease. Never attach
-credentials, private repository content, personal data, or other private data.
+Local media is checked against an explicit extension list, verified by file
+signature, limited to 10 MiB for an attached image and 100 MiB for anything
+else, and uploaded through the authenticated GitHub CLI session. Images and
+video become attachments on the repository the comment is posted to. Every
+other supported type is assigned a content-derived filename and uploaded to the
+public `comment-assets` prerelease. Never attach credentials, private
+repository content, personal data, or other private data.
 
 The operation workflow stores the App private key in a protected environment,
 mints a short-lived installation token scoped to one repository, requests only

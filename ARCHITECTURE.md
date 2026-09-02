@@ -19,10 +19,12 @@ performs one validated operation, and discards the token. Commits carry the
 requesting user as the commit author and the App as the committer. Workflow
 dispatches return the created target run URL.
 
-For local media paths, the CLI validates the file and uploads a content-named
-public asset to the `comment-assets` prerelease through the authenticated
-GitHub CLI session. Named placeholders decide where the resulting Markdown is
-inserted in a comment.
+For local media paths, the CLI validates the file and uploads it through the
+authenticated GitHub CLI session. Images and video the GitHub attachment
+endpoint accepts become user attachments on the repository the comment is
+posted to, and every other supported type becomes a content-named public asset
+in the `comment-assets` prerelease. Named placeholders decide where the
+resulting Markdown is inserted in a comment.
 
 The release workflow builds five platform artifacts, verifies them, publishes
 the crate through crates.io Trusted Publishing, produces checksums and an SBOM,

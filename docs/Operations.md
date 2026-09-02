@@ -104,6 +104,12 @@ JSON operations are `comment_create`, `comment_edit`, `comment_delete`, and
 array. Media names replace matching `{NAME}` placeholders as separate Markdown
 paragraphs.
 
+PNG, JPEG, GIF, WebP, SVG, MP4, MOV, and WebM upload as GitHub attachments on
+the repository the comment is posted to, which requires write access there. An
+image is capped at 10 MiB and renders inline. A video is capped at 100 MiB and
+renders as a player, so it takes no `alt`. Every other supported type uploads
+to Pukbot's `comment-assets` prerelease and renders as a link.
+
 The disclosure footer is appended to comment bodies after a blank line and a
 thematic break, so it never joins the last block of the body.
 
@@ -121,8 +127,7 @@ thematic break, so it never joins the last block of the body.
     },
     {
       "name": "DEMO",
-      "url": "https://example.com/demo.mp4",
-      "alt": "demo"
+      "path": "/absolute/demo.mp4"
     }
   ]
 }

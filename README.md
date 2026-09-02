@@ -133,8 +133,7 @@ For named media, provide one JSON request:
     },
     {
       "name": "VIDEO1",
-      "path": "/absolute/path/to/demo.mp4",
-      "alt": "demo"
+      "path": "/absolute/path/to/demo.mp4"
     }
   ]
 }
@@ -150,13 +149,17 @@ pukbot apply --input request.json --dry-run
 
 Each media object accepts exactly one `path` or `url`. Pukbot replaces every
 named placeholder with a separate Markdown paragraph, even when the placeholder
-is adjacent to text. Local files up to 100 MiB support PNG, JPEG, GIF,
-WebP, BMP, TIFF, AVIF, SVG, MP4, MOV, WebM, MKV, M4V, MP3, WAV, OGG, M4A,
-FLAC, AAC, PDF, text, Markdown, JSON, CSV, ZIP, Gzip, Tar, and 7-Zip.
+is adjacent to text.
 
-Local media is uploaded as a content-addressed public asset in Pukbot's
-`comment-assets` prerelease. Images render inline. Video, audio, documents, and
-archives render as links. Do not upload secrets or private media.
+PNG, JPEG, GIF, WebP, SVG, MP4, MOV, and WebM upload to the repository the
+comment is posted to as GitHub attachments, which requires write access there.
+An image up to 10 MiB renders inline. A video up to 100 MiB renders as a
+player, so it takes no `alt`.
+
+BMP, TIFF, AVIF, MKV, M4V, MP3, WAV, OGG, M4A, FLAC, AAC, PDF, text, Markdown,
+JSON, CSV, ZIP, Gzip, Tar, and 7-Zip up to 100 MiB upload as content-addressed
+public assets in Pukbot's `comment-assets` prerelease and render as links. Do
+not upload secrets or private media.
 
 Inspect the stable machine-readable feature inventory:
 
@@ -301,8 +304,10 @@ failed logs, returns a failing exit code on failure, and prints the posted
 comment URL on success.
 
 GitHub CLI must be installed and authenticated. The authenticated user needs
-permission to dispatch the Operation workflow in `pulkitxm/pukbot`. Local
-media uploads also require permission to upload release assets there.
+permission to dispatch the Operation workflow in `pulkitxm/pukbot`. Image and
+video attachments require write access to the repository the comment is posted
+to, and every other media type requires permission to upload release assets to
+`pulkitxm/pukbot`.
 
 ## Attribution
 

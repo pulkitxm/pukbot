@@ -501,22 +501,28 @@ impl Request {
                 repository,
                 number,
                 document,
-            } => Ok(Operation::CreateComment {
-                owner: repository.owner,
-                repository: repository.name,
-                number,
-                body: prepare_document(document, dry_run)?,
-            }),
+            } => {
+                let body = prepare_document(document, &repository, dry_run)?;
+                Ok(Operation::CreateComment {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    number,
+                    body,
+                })
+            }
             Self::EditComment {
                 repository,
                 comment_id,
                 document,
-            } => Ok(Operation::EditComment {
-                owner: repository.owner,
-                repository: repository.name,
-                comment_id,
-                body: prepare_document(document, dry_run)?,
-            }),
+            } => {
+                let body = prepare_document(document, &repository, dry_run)?;
+                Ok(Operation::EditComment {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    comment_id,
+                    body,
+                })
+            }
             Self::DeleteComment {
                 repository,
                 comment_id,
@@ -1491,9 +1497,14 @@ impl Operation {
     }
 }
 
-fn prepare_document(document: CommentDocument, dry_run: bool) -> Result<String> {
+fn prepare_document(
+    document: CommentDocument,
+    repository: &Repository,
+    dry_run: bool,
+) -> Result<String> {
     let mut names = HashSet::new();
     let mut body = document.body;
+    let target = media::UploadTarget::new(repository.slug());
     for item in document.media {
         if !names.insert(item.name.clone()) {
             bail!("duplicate media name: {}", item.name);
@@ -1502,7 +1513,7 @@ fn prepare_document(document: CommentDocument, dry_run: bool) -> Result<String> 
         if !body.contains(&placeholder) {
             bail!("comment body does not contain media placeholder {placeholder}");
         }
-        let markdown = media::resolve(&item, dry_run)?;
+        let markdown = media::resolve(&item, &target, dry_run)?;
         body = replace_media_placeholder(&body, &placeholder, &markdown);
     }
     validate_body(&body)?;

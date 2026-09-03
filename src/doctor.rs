@@ -260,8 +260,9 @@ pub fn filter_capabilities(commands: Vec<String>, report: &DoctorReport) -> Vec<
 
 #[cfg(test)]
 mod tests {
-    use super::{evaluate, has_write};
     use std::collections::BTreeMap;
+
+    use super::{evaluate, has_write};
 
     #[test]
     fn marks_workflow_commands_unavailable_without_actions_write() {

@@ -209,26 +209,26 @@ pub fn pull_request_threads(
     let slug = repository.slug();
     let query = r"
 query($owner: String!, $name: String!, $number: Int!) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100) {
-        nodes {
-          id
-          isResolved
-          isOutdated
-          path
-          line
-          diffSide
-          comments(first: 1) {
-            nodes {
-              author { login }
-              body
+    repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+            reviewThreads(first: 100) {
+                nodes {
+                    id
+                    isResolved
+                    isOutdated
+                    path
+                    line
+                    diffSide
+                    comments(first: 1) {
+                        nodes {
+                            author { login }
+                            body
+                        }
+                    }
+                }
             }
-          }
         }
-      }
     }
-  }
 }";
     let variables = json!({
         "owner": repository.owner,
@@ -288,9 +288,9 @@ pub fn resolve_review_thread(
     let query = format!(
         r"
 mutation($threadId: ID!) {{
-  {mutation}(input: {{threadId: $threadId}}) {{
-    thread {{ id isResolved }}
-  }}
+    {mutation}(input: {{threadId: $threadId}}) {{
+        thread {{ id isResolved }}
+    }}
 }}",
     );
     graphql(&slug, &query, &json!({ "threadId": thread_id }))?;

@@ -108,6 +108,19 @@ pub enum ReviewEvent {
     Comment,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReviewLineComment {
+    pub path: String,
+    pub line: NonZeroU64,
+    pub body: String,
+    #[serde(default = "default_review_side")]
+    pub side: String,
+}
+
+fn default_review_side() -> String {
+    "RIGHT".to_owned()
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum ReleaseLatest {
@@ -262,6 +275,12 @@ pub enum Request {
         head: String,
         base: String,
         #[serde(default)]
+        labels: Vec<String>,
+        #[serde(default)]
+        assignees: Vec<String>,
+        #[serde(default)]
+        reviewers: Vec<String>,
+        #[serde(default)]
         draft: bool,
         #[serde(default)]
         as_app: bool,
@@ -288,6 +307,10 @@ pub enum Request {
         number: NonZeroU64,
         #[serde(default)]
         as_app: bool,
+        #[serde(default)]
+        delete_branch: bool,
+        #[serde(default)]
+        auto_merge: bool,
     },
     PullRequestReady {
         repository: Repository,
@@ -302,6 +325,8 @@ pub enum Request {
         number: NonZeroU64,
         event: ReviewEvent,
         body: Option<String>,
+        #[serde(default)]
+        comments: Vec<ReviewLineComment>,
         #[serde(default)]
         as_app: bool,
     },
@@ -669,6 +694,9 @@ impl Request {
                 body,
                 head,
                 base,
+                labels,
+                assignees,
+                reviewers,
                 draft,
                 as_app,
             } => {
@@ -676,6 +704,9 @@ impl Request {
                 validate_optional_body(body.as_deref())?;
                 validate_branch(&head)?;
                 validate_branch(&base)?;
+                validate_values(&labels, "label")?;
+                validate_values(&assignees, "assignee")?;
+                validate_values(&reviewers, "reviewer")?;
                 Ok(Operation::PullRequestCreate {
                     owner: repository.owner,
                     repository: repository.name,
@@ -683,6 +714,9 @@ impl Request {
                     body,
                     head,
                     base,
+                    labels,
+                    assignees,
+                    reviewers,
                     draft,
                     as_app,
                 })
@@ -729,12 +763,23 @@ impl Request {
                 repository,
                 number,
                 as_app,
-            } => Ok(Operation::PullRequestMerge {
-                owner: repository.owner,
-                repository: repository.name,
-                number,
-                as_app,
-            }),
+                delete_branch,
+                auto_merge,
+            } => {
+                if (delete_branch || auto_merge) && as_app {
+                    bail!(
+                        "--delete-branch and --auto are only supported for user-authored pull request merges"
+                    );
+                }
+                Ok(Operation::PullRequestMerge {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    number,
+                    as_app,
+                    delete_branch,
+                    auto_merge,
+                })
+            }
             Self::PullRequestReady { repository, number } => Ok(Operation::PullRequestReady {
                 owner: repository.owner,
                 repository: repository.name,
@@ -750,11 +795,22 @@ impl Request {
                 number,
                 event,
                 body,
+                comments,
                 as_app,
             } => {
                 validate_optional_body(body.as_deref())?;
-                if matches!(event, ReviewEvent::RequestChanges) && body.is_none() {
-                    bail!("request-changes reviews require a body");
+                for comment in &comments {
+                    validate_commit_path(&comment.path)?;
+                    validate_body(&comment.body)?;
+                    if comment.side != "LEFT" && comment.side != "RIGHT" {
+                        bail!("review comment side must be LEFT or RIGHT");
+                    }
+                }
+                if matches!(event, ReviewEvent::RequestChanges)
+                    && body.is_none()
+                    && comments.is_empty()
+                {
+                    bail!("request-changes reviews require a body or at least one line comment");
                 }
                 Ok(Operation::PullRequestReview {
                     owner: repository.owner,
@@ -762,6 +818,7 @@ impl Request {
                     number,
                     event,
                     body,
+                    comments,
                     as_app,
                 })
             }
@@ -1297,6 +1354,9 @@ pub enum Operation {
         body: Option<String>,
         head: String,
         base: String,
+        labels: Vec<String>,
+        assignees: Vec<String>,
+        reviewers: Vec<String>,
         draft: bool,
         as_app: bool,
     },
@@ -1324,6 +1384,8 @@ pub enum Operation {
         repository: String,
         number: NonZeroU64,
         as_app: bool,
+        delete_branch: bool,
+        auto_merge: bool,
     },
     PullRequestReady {
         owner: String,
@@ -1341,6 +1403,7 @@ pub enum Operation {
         number: NonZeroU64,
         event: ReviewEvent,
         body: Option<String>,
+        comments: Vec<ReviewLineComment>,
         as_app: bool,
     },
     PullRequestLabels {

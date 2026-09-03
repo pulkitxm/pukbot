@@ -1,9 +1,12 @@
 mod commit;
 mod completion;
+mod doctor;
+mod error;
 mod local;
 mod manual;
 mod media;
 mod model;
+mod read;
 mod release_asset;
 mod stack;
 mod update;
@@ -23,7 +26,7 @@ use clap::{Args, Parser, Subcommand};
 use clap_complete::Shell;
 use model::{
     CommentDocument, DeploymentState, LockReason, MAX_BODY_BYTES, Reaction, ReleaseLatest,
-    Repository, Request, ReviewEvent,
+    Repository, Request, ReviewEvent, ReviewLineComment,
 };
 use serde::Serialize;
 
@@ -122,7 +125,8 @@ enum Commands {
     Completions(CompletionsArgs),
     Man(ManArgs),
     Update(UpdateArgs),
-    Capabilities,
+    Capabilities(CapabilitiesArgs),
+    Doctor(DoctorArgs),
 }
 
 #[derive(Debug, Args)]
@@ -153,12 +157,25 @@ struct UpdateArgs {
     check: bool,
 }
 
+#[derive(Debug, Args)]
+struct CapabilitiesArgs {
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Option<Repository>,
+}
+
+#[derive(Debug, Args)]
+struct DoctorArgs {
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+}
+
 #[derive(Debug, Subcommand)]
 enum CommentCommand {
     Create(CommentCreateArgs),
     Edit(CommentEditArgs),
     Delete(CommentDeleteArgs),
     React(CommentReactArgs),
+    Reply(CommentReplyArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -177,9 +194,11 @@ enum IssueCommand {
 enum PullRequestCommand {
     Create(PullRequestCreateArgs),
     Edit(PullRequestEditArgs),
+    View(PullRequestViewArgs),
+    Checks(PullRequestChecksArgs),
     Close(TargetArgs),
     Reopen(TargetArgs),
-    Merge(ConfirmedTargetArgs),
+    Merge(PullRequestMergeArgs),
     Ready(TargetArgs),
     Draft(TargetArgs),
     Review(PullRequestReviewArgs),
@@ -189,6 +208,11 @@ enum PullRequestCommand {
     UpdateBranch(PullRequestUpdateBranchArgs),
     #[command(about = "Disable auto-merge for a pull request")]
     DisableAutoMerge(TargetArgs),
+    Threads(PullRequestThreadsArgs),
+    Thread {
+        #[command(subcommand)]
+        command: PullRequestThreadCommand,
+    },
     Batch(BatchMutationArgs),
 }
 
@@ -261,6 +285,7 @@ enum WorkflowCommand {
     Rerun(WorkflowRerunArgs),
     Enable(WorkflowTargetArgs),
     Disable(WorkflowTargetArgs),
+    Runs(WorkflowRunsArgs),
     Status(WorkflowInspectArgs),
     Watch(WorkflowWatchArgs),
     Logs(WorkflowLogsArgs),
@@ -308,6 +333,15 @@ struct CommentReactArgs {
     reaction: Reaction,
     #[arg(long)]
     dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct CommentReplyArgs {
+    comment_id: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[command(flatten)]
+    content: BodyArgs,
 }
 
 #[derive(Debug, Args)]
@@ -690,6 +724,18 @@ struct WorkflowLogsArgs {
 }
 
 #[derive(Debug, Args)]
+struct WorkflowRunsArgs {
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long, value_name = "WORKFLOW")]
+    workflow: Option<String>,
+    #[arg(long, value_name = "BRANCH")]
+    branch: Option<String>,
+    #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..=100))]
+    limit: u64,
+}
+
+#[derive(Debug, Args)]
 struct TargetArgs {
     number: NonZeroU64,
     #[arg(long, value_name = "OWNER/REPOSITORY")]
@@ -706,6 +752,62 @@ struct ConfirmedTargetArgs {
     as_app: bool,
     #[arg(long)]
     yes: bool,
+}
+
+#[derive(Debug, Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "merge confirmation flags stay explicit for CLI users"
+)]
+struct PullRequestMergeArgs {
+    #[command(flatten)]
+    target: TargetArgs,
+    #[arg(long)]
+    as_app: bool,
+    #[arg(long)]
+    yes: bool,
+    #[arg(long)]
+    auto: bool,
+    #[arg(long)]
+    delete_branch: bool,
+}
+
+#[derive(Debug, Args)]
+struct PullRequestViewArgs {
+    number: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+}
+
+#[derive(Debug, Args)]
+struct PullRequestChecksArgs {
+    number: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    watch: bool,
+    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u64).range(1..=120))]
+    interval: u64,
+}
+
+#[derive(Debug, Args)]
+struct PullRequestThreadsArgs {
+    number: NonZeroU64,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+}
+
+#[derive(Debug, Subcommand)]
+enum PullRequestThreadCommand {
+    Resolve(PullRequestThreadResolveArgs),
+    Unresolve(PullRequestThreadResolveArgs),
+}
+
+#[derive(Debug, Args)]
+struct PullRequestThreadResolveArgs {
+    thread_id: String,
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
 }
 
 #[derive(Debug, Args)]
@@ -749,6 +851,12 @@ struct PullRequestCreateArgs {
     base: String,
     #[command(flatten)]
     content: BodyArgs,
+    #[arg(long = "label")]
+    labels: Vec<String>,
+    #[arg(long = "assignee")]
+    assignees: Vec<String>,
+    #[arg(long = "reviewer")]
+    reviewers: Vec<String>,
     #[arg(long)]
     draft: bool,
     #[arg(long)]
@@ -783,6 +891,8 @@ struct PullRequestReviewArgs {
     event: ReviewEvent,
     #[command(flatten)]
     content: BodyArgs,
+    #[arg(long = "comment", value_name = "PATH:LINE:BODY")]
+    comments: Vec<String>,
     #[arg(long)]
     as_app: bool,
     #[arg(long)]
@@ -936,7 +1046,7 @@ struct WorkflowDispatchWatchResult {
 #[serde(rename_all = "camelCase")]
 struct Capabilities {
     protocol_version: u8,
-    commands: Vec<&'static str>,
+    commands: Vec<String>,
     media: Vec<&'static str>,
     markdown: Markdown,
     output: Vec<&'static str>,
@@ -972,8 +1082,15 @@ fn main() {
     if let Some(arguments) = raw_stack_arguments() {
         exit_with_stack_command(arguments);
     }
-    if let Err(error) = run() {
-        drop(writeln!(io::stderr().lock(), "error: {error:#}"));
+    let cli = Cli::parse();
+    let json = cli.json;
+    if let Err(error) = run(cli) {
+        if json {
+            let body = error::classify(&error);
+            drop(error::emit_json_error(&body));
+        } else {
+            drop(writeln!(io::stderr().lock(), "error: {error:#}"));
+        }
         process::exit(1);
     }
 }
@@ -1038,8 +1155,7 @@ fn run_stack_compatibility_merge(arguments: impl IntoIterator<Item = OsString>) 
     Ok(())
 }
 
-fn run() -> Result<()> {
-    let cli = Cli::parse();
+fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Apply(args) => {
             let request = read_request(&args.input)?;
@@ -1061,7 +1177,8 @@ fn run() -> Result<()> {
         Commands::Completions(args) => run_completions(args, cli.json),
         Commands::Man(args) => run_manual(args, cli.json),
         Commands::Update(args) => run_update(args, cli.json),
-        Commands::Capabilities => emit_capabilities(cli.json),
+        Commands::Capabilities(args) => emit_capabilities(&args, cli.json),
+        Commands::Doctor(args) => run_doctor(&args, cli.json),
     }
 }
 
@@ -1172,6 +1289,22 @@ fn run_comment(command: CommentCommand, json: bool) -> Result<()> {
             args.dry_run,
             json,
         ),
+        CommentCommand::Reply(args) => {
+            let url = read::reply_to_review_comment(
+                &args.repo,
+                args.comment_id,
+                &read_body(&args.content)?,
+            )?;
+            if json {
+                emit_json(&serde_json::json!({
+                    "operation": "comment_reply",
+                    "resourceUrl": url,
+                }))
+            } else {
+                writeln!(io::stdout().lock(), "{url}")?;
+                Ok(())
+            }
+        }
     }
 }
 
@@ -1248,6 +1381,10 @@ fn execute_issue_target(args: TargetArgs, json: bool, close: bool) -> Result<()>
     execute(request, args.dry_run, json)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "pull request dispatch stays in one match"
+)]
 fn run_pull_request(command: PullRequestCommand, json: bool) -> Result<()> {
     match command {
         PullRequestCommand::Create(args) => execute(
@@ -1257,12 +1394,58 @@ fn run_pull_request(command: PullRequestCommand, json: bool) -> Result<()> {
                 body: read_optional_body(&args.content)?,
                 head: args.head,
                 base: args.base,
+                labels: args.labels,
+                assignees: args.assignees,
+                reviewers: args.reviewers,
                 draft: args.draft,
                 as_app: args.as_app,
             },
             args.dry_run,
             json,
         ),
+        PullRequestCommand::View(args) => {
+            let view = read::pull_request_view(&args.repo, args.number)?;
+            if json {
+                emit_json(&view)
+            } else {
+                let mut stdout = io::stdout().lock();
+                writeln!(stdout, "#{} {} ({})", view.number, view.title, view.state)?;
+                writeln!(
+                    stdout,
+                    "mergeable: {} ({})",
+                    view.mergeable, view.merge_state_status
+                )?;
+                writeln!(stdout, "branch: {} -> {}", view.head_ref, view.base_ref)?;
+                writeln!(
+                    stdout,
+                    "unresolved threads: {}",
+                    view.unresolved_thread_count
+                )?;
+                writeln!(stdout, "{}", view.url)?;
+                Ok(())
+            }
+        }
+        PullRequestCommand::Checks(args) => {
+            let checks = if args.watch {
+                read::watch_pull_request_checks(
+                    &args.repo,
+                    args.number,
+                    Duration::from_secs(args.interval),
+                )?
+            } else {
+                read::pull_request_checks(&args.repo, args.number)?
+            };
+            if json {
+                emit_json(&checks)
+            } else {
+                let mut stdout = io::stdout().lock();
+                writeln!(stdout, "#{} checks: {}", checks.number, checks.state)?;
+                for check in checks.checks {
+                    writeln!(stdout, "- {}: {}", check.name, check.state)?;
+                }
+                Ok(())
+            }
+        }
         PullRequestCommand::Edit(args) => execute(
             Request::PullRequestEdit {
                 repository: args.repo,
@@ -1286,6 +1469,8 @@ fn run_pull_request(command: PullRequestCommand, json: bool) -> Result<()> {
                     repository: args.target.repo,
                     number: args.target.number,
                     as_app: args.as_app,
+                    delete_branch: args.delete_branch,
+                    auto_merge: args.auto,
                 },
                 args.target.dry_run,
                 json,
@@ -1299,6 +1484,7 @@ fn run_pull_request(command: PullRequestCommand, json: bool) -> Result<()> {
                 number: args.number,
                 event: args.event,
                 body: read_optional_body(&args.content)?,
+                comments: parse_review_comments(&args.comments)?,
                 as_app: args.as_app,
             },
             args.dry_run,
@@ -1345,6 +1531,38 @@ fn run_pull_request(command: PullRequestCommand, json: bool) -> Result<()> {
         PullRequestCommand::DisableAutoMerge(args) => {
             execute_pull_request_disable_auto_merge(args, json)
         }
+        PullRequestCommand::Threads(args) => {
+            let threads = read::pull_request_threads(&args.repo, args.number)?;
+            emit_json(&threads)
+        }
+        PullRequestCommand::Thread { command } => match command {
+            PullRequestThreadCommand::Resolve(args) => {
+                read::resolve_review_thread(&args.repo, &args.thread_id, true)?;
+                if json {
+                    emit_json(&serde_json::json!({
+                        "operation": "pull_request_thread_resolve",
+                        "threadId": args.thread_id,
+                        "isResolved": true,
+                    }))
+                } else {
+                    writeln!(io::stdout().lock(), "resolved {}", args.thread_id)?;
+                    Ok(())
+                }
+            }
+            PullRequestThreadCommand::Unresolve(args) => {
+                read::resolve_review_thread(&args.repo, &args.thread_id, false)?;
+                if json {
+                    emit_json(&serde_json::json!({
+                        "operation": "pull_request_thread_unresolve",
+                        "threadId": args.thread_id,
+                        "isResolved": false,
+                    }))
+                } else {
+                    writeln!(io::stdout().lock(), "unresolved {}", args.thread_id)?;
+                    Ok(())
+                }
+            }
+        },
         PullRequestCommand::Batch(args) => execute_batch(args, json, true),
     }
 }
@@ -1764,6 +1982,27 @@ fn run_workflow(command: WorkflowCommand, json: bool) -> Result<()> {
             args.dry_run,
             json,
         ),
+        WorkflowCommand::Runs(args) => {
+            let runs = read::workflow_runs(
+                &args.repo,
+                args.workflow.as_deref(),
+                args.branch.as_deref(),
+                args.limit,
+            )?;
+            if json {
+                emit_json(&runs)
+            } else {
+                let mut stdout = io::stdout().lock();
+                for run in runs {
+                    writeln!(
+                        stdout,
+                        "{} #{} {} {} {}",
+                        run.workflow_name, run.database_id, run.head_branch, run.status, run.url
+                    )?;
+                }
+                Ok(())
+            }
+        }
         WorkflowCommand::Status(args) => {
             let run = workflow_run::inspect(&args.repo, args.run_id)?;
             workflow_run::emit_status(&run, json)
@@ -1980,8 +2219,12 @@ fn emit_json(value: &impl Serialize) -> Result<()> {
     Ok(())
 }
 
-fn emit_capabilities(json: bool) -> Result<()> {
-    let capabilities = capabilities();
+fn emit_capabilities(args: &CapabilitiesArgs, json: bool) -> Result<()> {
+    let mut capabilities = capabilities();
+    if let Some(repository) = &args.repo {
+        let report = doctor::run(repository)?;
+        capabilities.commands = doctor::filter_capabilities(capability_commands(), &report);
+    }
     if json {
         emit_json(&capabilities)
     } else {
@@ -2024,96 +2267,156 @@ fn emit_capabilities(json: bool) -> Result<()> {
     }
 }
 
+fn run_doctor(args: &DoctorArgs, json: bool) -> Result<()> {
+    let report = doctor::run(&args.repo)?;
+    if json {
+        emit_json(&report)
+    } else {
+        let mut stdout = io::stdout().lock();
+        writeln!(stdout, "repository: {}", report.repository)?;
+        writeln!(stdout, "installed: {}", report.installed)?;
+        if let Some(app_slug) = &report.app_slug {
+            writeln!(stdout, "app: {app_slug}")?;
+        }
+        for operation in report.operations {
+            let status = if operation.available { "ok" } else { "missing" };
+            writeln!(stdout, "{status} {}", operation.command)?;
+        }
+        Ok(())
+    }
+}
+
+fn parse_review_comments(values: &[String]) -> Result<Vec<ReviewLineComment>> {
+    values
+        .iter()
+        .map(|value| {
+            let Some((path, rest)) = value.split_once(':') else {
+                bail!("review comment must use path:line:body");
+            };
+            let Some((line_text, body)) = rest.split_once(':') else {
+                bail!("review comment must use path:line:body");
+            };
+            let line = line_text
+                .parse::<NonZeroU64>()
+                .context("review comment line must be a positive integer")?;
+            if body.is_empty() {
+                bail!("review comment body cannot be empty");
+            }
+            Ok(ReviewLineComment {
+                path: path.to_owned(),
+                line,
+                body: body.to_owned(),
+                side: "RIGHT".to_owned(),
+            })
+        })
+        .collect()
+}
+
 fn capabilities() -> Capabilities {
     Capabilities {
         protocol_version: 1,
-        commands: vec![
-            "apply",
-            "comment.create",
-            "comment.edit",
-            "comment.delete",
-            "comment.react",
-            "issue.create",
-            "issue.edit",
-            "issue.close",
-            "issue.reopen",
-            "issue.labels",
-            "issue.assignees",
-            "issue.react",
-            "issue.batch",
-            "pr.create",
-            "pr.edit",
-            "pr.close",
-            "pr.reopen",
-            "pr.merge",
-            "pr.ready",
-            "pr.draft",
-            "pr.review",
-            "pr.labels",
-            "pr.assignees",
-            "pr.react",
-            "pr.update-branch",
-            "pr.disable-auto-merge",
-            "pr.batch",
-            "stack.init",
-            "stack.add",
-            "stack.view",
-            "stack.checkout",
-            "stack.modify",
-            "stack.unstack",
-            "stack.delete",
-            "stack.link",
-            "stack.merge",
-            "stack.push",
-            "stack.rebase",
-            "stack.submit",
-            "stack.sync",
-            "stack.switch",
-            "stack.up",
-            "stack.down",
-            "stack.top",
-            "stack.bottom",
-            "stack.trunk",
-            "stack.alias",
-            "stack.feedback",
-            "stack-api.list",
-            "stack-api.view",
-            "stack-api.create",
-            "stack-api.append",
-            "stack-api.unstack",
-            "stack-api.merge",
-            "stack-api.merge-status",
-            "commit.create",
-            "wiki.publish",
-            "repository.dispatch",
-            "ref.create",
-            "ref.delete",
-            "tag.create",
-            "tag.delete",
-            "release.create",
-            "release.edit",
-            "release.delete",
-            "release.upload-asset",
-            "deployment.create",
-            "deployment.status",
-            "workflow.dispatch",
-            "workflow.cancel",
-            "workflow.rerun",
-            "workflow.enable",
-            "workflow.disable",
-            "workflow.status",
-            "workflow.watch",
-            "workflow.logs",
-            "completions",
-            "man",
-            "update",
-        ],
+        commands: capability_commands(),
         media: media::supported_extensions(),
         markdown: markdown_capabilities(),
         output: vec!["text", "json"],
         attribution: attribution_capabilities(),
         modes: mode_capabilities(),
     }
+}
+
+fn capability_commands() -> Vec<String> {
+    [
+        "apply",
+        "comment.create",
+        "comment.edit",
+        "comment.delete",
+        "comment.react",
+        "comment.reply",
+        "issue.create",
+        "issue.edit",
+        "issue.close",
+        "issue.reopen",
+        "issue.labels",
+        "issue.assignees",
+        "issue.react",
+        "issue.batch",
+        "pr.create",
+        "pr.edit",
+        "pr.view",
+        "pr.checks",
+        "pr.close",
+        "pr.reopen",
+        "pr.merge",
+        "pr.ready",
+        "pr.draft",
+        "pr.review",
+        "pr.labels",
+        "pr.assignees",
+        "pr.react",
+        "pr.update-branch",
+        "pr.disable-auto-merge",
+        "pr.threads",
+        "pr.thread.resolve",
+        "pr.thread.unresolve",
+        "pr.batch",
+        "stack.init",
+        "stack.add",
+        "stack.view",
+        "stack.checkout",
+        "stack.modify",
+        "stack.unstack",
+        "stack.delete",
+        "stack.link",
+        "stack.merge",
+        "stack.push",
+        "stack.rebase",
+        "stack.submit",
+        "stack.sync",
+        "stack.switch",
+        "stack.up",
+        "stack.down",
+        "stack.top",
+        "stack.bottom",
+        "stack.trunk",
+        "stack.alias",
+        "stack.feedback",
+        "stack-api.list",
+        "stack-api.view",
+        "stack-api.create",
+        "stack-api.append",
+        "stack-api.unstack",
+        "stack-api.merge",
+        "stack-api.merge-status",
+        "commit.create",
+        "wiki.publish",
+        "repository.dispatch",
+        "ref.create",
+        "ref.delete",
+        "tag.create",
+        "tag.delete",
+        "release.create",
+        "release.edit",
+        "release.delete",
+        "release.upload-asset",
+        "deployment.create",
+        "deployment.status",
+        "workflow.dispatch",
+        "workflow.cancel",
+        "workflow.rerun",
+        "workflow.enable",
+        "workflow.disable",
+        "workflow.runs",
+        "workflow.status",
+        "workflow.watch",
+        "workflow.logs",
+        "completions",
+        "man",
+        "update",
+        "doctor",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
 }
 
 fn attribution_capabilities() -> Attribution {
@@ -2132,6 +2435,10 @@ fn attribution_capabilities() -> Attribution {
             "pr.react",
             "pr.update-branch",
             "pr.disable-auto-merge",
+            "pr.threads",
+            "pr.thread.resolve",
+            "pr.thread.unresolve",
+            "comment.reply",
             "stack.init",
             "stack.add",
             "stack.checkout",
@@ -2200,9 +2507,14 @@ fn attribution_capabilities() -> Attribution {
             "stack-api.list",
             "stack-api.view",
             "stack-api.merge-status",
+            "pr.view",
+            "pr.checks",
+            "pr.threads",
+            "workflow.runs",
             "workflow.status",
             "workflow.watch",
             "workflow.logs",
+            "doctor",
         ],
     }
 }
@@ -2329,7 +2641,7 @@ mod tests {
             "stack-api.merge",
             "stack-api.merge-status",
         ] {
-            assert!(commands.contains(&command), "{command}");
+            assert!(commands.iter().any(|entry| entry == command), "{command}");
         }
     }
 

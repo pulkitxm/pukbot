@@ -43,6 +43,9 @@ pub fn execute(operation: &Operation) -> Result<String> {
             body,
             head,
             base,
+            labels,
+            assignees,
+            reviewers,
             draft,
             as_app: _,
         } => {
@@ -52,12 +55,39 @@ pub fn execute(operation: &Operation) -> Result<String> {
             request.insert("base".to_owned(), json!(base));
             request.insert("draft".to_owned(), json!(draft));
             insert_optional(&mut request, "body", body.as_deref());
-            api(
+            let url = api(
                 "POST",
                 &format!("repos/{}/pulls", slug(owner, repository)),
                 Some(&Value::Object(request)),
                 Some(".html_url"),
-            )
+            )?;
+            let number = pull_request_number_from_url(&url)?;
+            let slug = slug(owner, repository);
+            if !labels.is_empty() {
+                api(
+                    "POST",
+                    &format!("repos/{slug}/issues/{number}/labels"),
+                    Some(&json!({"labels": labels})),
+                    None,
+                )?;
+            }
+            if !assignees.is_empty() {
+                api(
+                    "POST",
+                    &format!("repos/{slug}/issues/{number}/assignees"),
+                    Some(&json!({"assignees": assignees})),
+                    None,
+                )?;
+            }
+            if !reviewers.is_empty() {
+                api(
+                    "POST",
+                    &format!("repos/{slug}/pulls/{number}/requested_reviewers"),
+                    Some(&json!({"reviewers": reviewers})),
+                    None,
+                )?;
+            }
+            Ok(url)
         }
         Operation::PullRequestEdit {
             owner,
@@ -104,6 +134,8 @@ pub fn execute(operation: &Operation) -> Result<String> {
             repository,
             number,
             as_app: _,
+            delete_branch,
+            auto_merge,
         } => {
             if let Some(head_sha) = stack::stacked_head_sha(owner, repository, *number)? {
                 return stack::merge_known_stack_pull_request(
@@ -112,17 +144,34 @@ pub fn execute(operation: &Operation) -> Result<String> {
             }
             let slug = slug(owner, repository);
             let path = format!("repos/{slug}/pulls/{number}");
-            let title = api("GET", &path, None, Some(".title"))?;
-            api(
-                "PUT",
-                &format!("{path}/merge"),
-                Some(&json!({
-                    "merge_method": "squash",
-                    "commit_title": squash_title(&title, number.get()),
-                    "commit_message": ""
-                })),
-                None,
-            )?;
+            let pull = api("GET", &path, None, None)?;
+            let pull_value: Value =
+                serde_json::from_str(&pull).context("failed to decode pull request")?;
+            let head_ref = pull_value
+                .pointer("/head/ref")
+                .and_then(Value::as_str)
+                .context("pull request head ref was missing")?;
+            if *auto_merge {
+                enable_auto_merge(&slug, number.get())?;
+            } else {
+                let title = pull_value
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                api(
+                    "PUT",
+                    &format!("{path}/merge"),
+                    Some(&json!({
+                        "merge_method": "squash",
+                        "commit_title": squash_title(title, number.get()),
+                        "commit_message": ""
+                    })),
+                    None,
+                )?;
+            }
+            if *delete_branch {
+                delete_head_ref(owner, repository, head_ref)?;
+            }
             Ok(pull_request_url(&slug, number.get()))
         }
         Operation::PullRequestReady {
@@ -141,12 +190,31 @@ pub fn execute(operation: &Operation) -> Result<String> {
             number,
             event,
             body,
+            comments,
             as_app: _,
         } => {
             let slug = slug(owner, repository);
             let mut request = Map::new();
             request.insert("event".to_owned(), json!(review_event(*event)));
             insert_optional(&mut request, "body", body.as_deref());
+            if !comments.is_empty() {
+                request.insert(
+                    "comments".to_owned(),
+                    json!(
+                        comments
+                            .iter()
+                            .map(|comment| {
+                                json!({
+                                    "path": comment.path,
+                                    "line": comment.line.get(),
+                                    "side": comment.side,
+                                    "body": comment.body,
+                                })
+                            })
+                            .collect::<Vec<_>>()
+                    ),
+                );
+            }
             api(
                 "POST",
                 &format!("repos/{slug}/pulls/{number}/reviews"),
@@ -267,6 +335,45 @@ fn disable_auto_merge(owner: &str, repository: &str, number: u64) -> Result<Stri
         );
     }
     Ok(pull_request_url(&slug, number))
+}
+
+fn enable_auto_merge(slug: &str, number: u64) -> Result<()> {
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "merge",
+            &number.to_string(),
+            "--repo",
+            slug,
+            "--auto",
+            "--squash",
+        ])
+        .output()
+        .context("failed to launch gh; install and authenticate GitHub CLI")?;
+    if !output.status.success() {
+        bail!(
+            "GitHub rejected auto-merge: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+fn delete_head_ref(owner: &str, repository: &str, head_ref: &str) -> Result<()> {
+    api(
+        "DELETE",
+        &format!("repos/{owner}/{repository}/git/refs/heads/{head_ref}"),
+        None,
+        None,
+    )?;
+    Ok(())
+}
+
+fn pull_request_number_from_url(url: &str) -> Result<u64> {
+    url.rsplit('/')
+        .next()
+        .and_then(|value| value.parse().ok())
+        .context("pull request URL did not contain a number")
 }
 
 fn set_draft(owner: &str, repository: &str, number: u64, draft: bool) -> Result<String> {

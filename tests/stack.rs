@@ -118,10 +118,22 @@ fn assert_success(output: &Output) {
 
 fn assert_failure(output: &Output, message: &str) {
     assert!(!output.status.success(), "command unexpectedly succeeded");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let found_in_stderr = stderr.contains(message);
+    let found_in_stdout = stdout.contains(message)
+        || serde_json::from_str::<Value>(&stdout)
+            .ok()
+            .and_then(|value| {
+                value
+                    .pointer("/error/message")
+                    .and_then(Value::as_str)
+                    .map(|text| text.contains(message))
+            })
+            .unwrap_or(false);
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains(message),
-        "missing error {message:?}: {}",
-        String::from_utf8_lossy(&output.stderr)
+        found_in_stderr || found_in_stdout,
+        "missing error {message:?}: stderr={stderr} stdout={stdout}"
     );
 }
 

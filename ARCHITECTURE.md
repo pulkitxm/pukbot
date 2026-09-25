@@ -18,13 +18,20 @@ and asynchronous merge through GitHub's native stack endpoints. Pull request
 merge checks stack membership and selects the asynchronous endpoint when
 needed.
 
-Comment, issue, commit, and workflow dispatch operations dispatch the
-repository's `operation.yml` workflow. The workflow reads the private key from
+Commits execute locally through the authenticated GitHub CLI session by
+default, so the user is the author and committer, staged modes and binary
+content are preserved, and workflow files can change under the session's
+workflow scope. After a commit lands, the CLI fast-forwards the local branch
+with a soft reset only when the checkout is on that branch at the commit's
+parent, so the index and working tree are never modified.
+
+Comment, issue, App-authored commit, and workflow dispatch operations dispatch
+the repository's `operation.yml` workflow. The workflow reads the private key from
 the protected `pukbot-production` environment, creates a short-lived
 installation token scoped to the requested repository and required permission,
-performs one validated operation, and discards the token. Commits carry the
-requesting user as the commit author and the App as the committer. Workflow
-dispatches return the created target run URL.
+performs one validated operation, and discards the token. App-authored commits
+request the workflows permission only when they touch `.github/workflows`.
+Workflow dispatches return the created target run URL.
 
 For local media paths, the CLI validates the file and uploads it through the
 authenticated GitHub CLI session. Images and video the GitHub attachment

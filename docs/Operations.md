@@ -423,14 +423,23 @@ pukbot commit create data/members.json --repo owner/repository --branch main \
   --message "data: refresh roster" --as-app
 ```
 
-The commit records the requesting GitHub account as the commit author and the
-Pukbot App as the committer, so it appears as authored by you and committed by
-Pukbot and counts toward your contributions. Pass `--as-app`, or set
-`"as_app": true` in the typed JSON operation, to record Pukbot as both author
-and committer for a fully automated commit. Identities are resolved inside the
-protected workflow and cannot be supplied as arbitrary names or emails. The
-branch ref update is never forced: if the branch has moved since the commit was
-built, the operation fails instead of overwriting the newer history.
+The commit is created through your authenticated GitHub CLI session, so you are
+its author and committer and it counts toward your contributions. Staged
+content lands exactly as staged, including executable bits, symlinks, binary
+files, and `.github/workflows` edits. Pass `--as-app`, or set `"as_app": true`
+in the typed JSON operation, to record Pukbot as both author and committer for a
+fully automated commit; those identities are resolved inside the protected
+workflow and cannot be supplied as arbitrary names or emails, and
+`.github/workflows` edits need the App's Workflows permission. The branch ref
+update is never forced: if the branch has moved since the commit was built, the
+operation fails instead of overwriting the newer history.
+
+When the checkout is on the target branch and its HEAD is the new commit's
+parent, Pukbot fetches the commit and moves the local branch with
+`git reset --soft`, so the index and working tree are never touched. The result
+reports this as `localSync`. When the branch is left untouched, reconcile it
+with `git fetch` and `git rebase`, never `git reset --hard`, because a failed or
+partial commit leaves your edits only in the working tree.
 
 ## Repository dispatches
 
@@ -550,23 +559,23 @@ Results report who GitHub records as the actor:
 }
 ```
 
-`authoredBy` is `user` for ordinary `pr` operations and stack mutations, which
-execute locally under the authenticated GitHub CLI session. It is `pukbot` for
-pull request create, edit, merge, review, and update-branch with `--as-app`, and
-for every `comment`, `issue`, `commit`, repository dispatch, and workflow
-mutation. App operations execute inside the protected workflow under a
-short-lived App installation token and carry a `workflowUrl`.
+`authoredBy` is `user` for ordinary `pr` operations, stack mutations, and
+`commit create`, which execute locally under the authenticated GitHub CLI
+session. It is `pukbot` for pull request create, edit, merge, review, and
+update-branch with `--as-app`, for `commit create` with `--as-app`, and for every
+`comment`, `issue`, repository dispatch, and workflow mutation. App operations
+execute inside the protected workflow under a short-lived App installation
+token and carry a `workflowUrl`.
 
 `pukbot capabilities --json` reports the same split under `attribution`.
 
 The JSON operation is `commit_create` and accepts `branch`, `message`, an
-optional `as_app` Boolean, and a `files` array of `{path, content, delete}`
-objects. Set `delete: true` to remove a path, otherwise provide `content` as
-UTF-8 text. At most 50 files, 60,000 bytes per file, and 120,000 bytes combined.
-
-Only text content is supported. Staged binary files (images, video, and
-other non-UTF-8 content) are rejected before any request is sent; commit
-those with local git for now.
+optional `as_app` Boolean, and a `files` array of
+`{path, content, delete, mode, encoding}` objects. Set `delete: true` to remove
+a path, otherwise provide `content`. `mode` is `100644` (default), `100755`, or
+`120000`, and `encoding` is `utf-8` (default) or `base64` for binary content.
+App-authored commits allow at most 50 files, 60,000 bytes per file, and 120,000
+bytes combined, because the operation travels as a workflow input.
 
 ## Wiki publishing
 

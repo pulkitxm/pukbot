@@ -218,9 +218,9 @@ SHA, and fail if repository rules require a merge queue. `pukbot pr merge`
 detects stacked pull requests and automatically uses the required asynchronous
 merge flow. The repository must have GitHub stacked pull requests enabled.
 
-Commit staged local changes atomically through the GitHub Git Data API. The
-requester is the author by default, while `--as-app` records Pukbot as both
-author and committer:
+Commit staged local changes atomically through the GitHub Git Data API. By
+default the commit is created through your GitHub CLI session, while `--as-app`
+records Pukbot as both author and committer:
 
 ```bash
 git add data/members.json
@@ -229,8 +229,11 @@ pukbot commit create --repo owner/repository --branch main \
   --message "data: automated update" --as-app
 ```
 
-Only text content is supported today; staged binary files are rejected
-before dispatch.
+Staged content lands exactly as staged, including executable bits, symlinks,
+binary files, and `.github/workflows` edits. When the checkout is on the target
+branch and its HEAD is the new commit's parent, Pukbot moves the local branch
+to the new commit with `git reset --soft`, so the index and working tree are
+never touched.
 
 Create and delete Git refs, lightweight tags, and annotated tags through the
 App:
@@ -327,6 +330,7 @@ Authored by you, executed through your local authenticated GitHub CLI session:
 
 - every `pr` operation, including `create`, `review`, and `merge`
 - every proxied gh-stack command and every `stack-api` mutation
+- `commit create`
 
 The pull request author, the reviewer, the merge event, and the squash commit
 on the base branch are all yours, so the work lands in your GitHub
@@ -340,7 +344,7 @@ with an explicit commit message that prevents generated attribution trailers.
 Authored by the Pukbot App, executed inside the protected workflow:
 
 - every `comment` and `issue` operation
-- `commit create`
+- `commit create` with `--as-app`
 - `repository dispatch`
 - ref and tag create and delete
 - release create, edit, delete, and asset upload
@@ -351,11 +355,10 @@ mutation. It cannot replace GitHub's internal Actions identity. Workflow jobs
 still execute as GitHub Actions, and steps using the automatic `GITHUB_TOKEN`
 remain attributable to `github-actions[bot]`.
 
-`commit create` records you as the commit author and the App as the committer,
-so the commit shows as authored by you and committed by Pukbot, and it counts
+`commit create` records you as the commit author and committer, so it counts
 toward your contributions. With `--as-app`, Pukbot is both author and
-committer. Identities are derived inside the workflow and cannot be set to an
-arbitrary name or email from the CLI.
+committer; those identities are derived inside the workflow and cannot be set
+to an arbitrary name or email from the CLI.
 
 ## Agent instructions
 

@@ -2664,6 +2664,7 @@ fn attribution_capabilities() -> Attribution {
             "stack-api.append",
             "stack-api.unstack",
             "stack-api.merge",
+            "commit.create",
         ],
         app: vec![
             "comment.create",

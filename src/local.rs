@@ -618,4 +618,19 @@ mod tests {
             assert!(runs_locally(&operation));
         }
     }
+
+    #[test]
+    fn keeps_app_commits_on_the_app_workflow() {
+        let commit = |as_app: bool| {
+            let document = format!(
+                r#"{{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"m","files":[{{"path":"a.txt","content":"x"}}],"as_app":{as_app}}}"#
+            );
+            serde_json::from_str::<Request>(&document)
+                .expect("request should parse")
+                .prepare(true)
+                .expect("request should prepare")
+        };
+        assert!(runs_locally(&commit(false)));
+        assert!(!runs_locally(&commit(true)));
+    }
 }

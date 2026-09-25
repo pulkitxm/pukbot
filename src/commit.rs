@@ -212,7 +212,7 @@ mod tests {
     use std::fs;
     use std::process::Command;
 
-    use super::{staged_files_at, sync_at};
+    use super::staged_files_at;
 
     fn init_repo() -> tempfile::TempDir {
         let directory = tempfile::tempdir().expect("temporary directory should be created");
@@ -332,6 +332,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn syncs_the_local_branch_without_touching_the_working_tree() {
+        use super::sync_at;
+
         let remote = tempfile::tempdir().expect("remote directory should be created");
         let git_in = |directory: &std::path::Path, args: &[&str]| -> String {
             let output = Command::new("git")

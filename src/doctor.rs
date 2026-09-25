@@ -234,6 +234,13 @@ pub fn filter_capabilities(commands: Vec<String>, report: &DoctorReport) -> Vec<
                 || matches!(
                     command.as_str(),
                     "apply"
+                        | "crew.path"
+                        | "crew.agents"
+                        | "crew.show"
+                        | "crew.assign"
+                        | "crew.clear"
+                        | "crew.define"
+                        | "crew.forget"
                         | "completions"
                         | "man"
                         | "update"

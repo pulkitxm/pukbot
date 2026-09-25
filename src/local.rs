@@ -136,10 +136,15 @@ pub fn execute(operation: &Operation) -> Result<String> {
             as_app: _,
             delete_branch,
             auto_merge,
+            commit_message,
         } => {
             if let Some(head_sha) = stack::stacked_head_sha(owner, repository, *number)? {
                 return stack::merge_known_stack_pull_request(
-                    owner, repository, *number, &head_sha,
+                    owner,
+                    repository,
+                    *number,
+                    &head_sha,
+                    commit_message.as_deref(),
                 );
             }
             let slug = slug(owner, repository);
@@ -152,7 +157,7 @@ pub fn execute(operation: &Operation) -> Result<String> {
                 .and_then(Value::as_str)
                 .context("pull request head ref was missing")?;
             if *auto_merge {
-                enable_auto_merge(&slug, number.get())?;
+                enable_auto_merge(&slug, number.get(), commit_message.as_deref())?;
             } else {
                 let title = pull_value
                     .get("title")
@@ -164,7 +169,7 @@ pub fn execute(operation: &Operation) -> Result<String> {
                     Some(&json!({
                         "merge_method": "squash",
                         "commit_title": squash_title(title, number.get()),
-                        "commit_message": ""
+                        "commit_message": commit_message.as_deref().unwrap_or_default()
                     })),
                     None,
                 )?;
@@ -337,17 +342,21 @@ fn disable_auto_merge(owner: &str, repository: &str, number: u64) -> Result<Stri
     Ok(pull_request_url(&slug, number))
 }
 
-fn enable_auto_merge(slug: &str, number: u64) -> Result<()> {
-    let output = Command::new("gh")
-        .args([
-            "pr",
-            "merge",
-            &number.to_string(),
-            "--repo",
-            slug,
-            "--auto",
-            "--squash",
-        ])
+fn enable_auto_merge(slug: &str, number: u64, commit_message: Option<&str>) -> Result<()> {
+    let mut command = Command::new("gh");
+    command.args([
+        "pr",
+        "merge",
+        &number.to_string(),
+        "--repo",
+        slug,
+        "--auto",
+        "--squash",
+    ]);
+    if let Some(body) = commit_message {
+        command.args(["--body", body]);
+    }
+    let output = command
         .output()
         .context("failed to launch gh; install and authenticate GitHub CLI")?;
     if !output.status.success() {

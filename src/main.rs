@@ -1,5 +1,6 @@
 mod commit;
 mod completion;
+mod crew;
 mod doctor;
 mod error;
 mod local;
@@ -94,6 +95,11 @@ enum Commands {
         #[command(subcommand)]
         command: CommitCommand,
     },
+    #[command(about = "Manage the portable crew manifest signed into Pukbot commits and merges")]
+    Crew {
+        #[command(subcommand)]
+        command: CrewCommand,
+    },
     Wiki {
         #[command(subcommand)]
         command: WikiCommand,
@@ -167,6 +173,54 @@ struct CapabilitiesArgs {
 struct DoctorArgs {
     #[arg(long, value_name = "OWNER/REPOSITORY")]
     repo: Repository,
+}
+
+#[derive(Debug, Subcommand)]
+enum CrewCommand {
+    #[command(about = "Print the crew manifest path")]
+    Path,
+    #[command(about = "List built-in and custom crew members")]
+    Agents,
+    #[command(about = "Show the trailers signed into a repository's commits and merges")]
+    Show(CrewTargetArgs),
+    #[command(about = "Assign crew members to a repository, replacing any previous assignment")]
+    Assign(CrewAssignArgs),
+    #[command(about = "Remove a repository's crew assignment")]
+    Clear(CrewTargetArgs),
+    #[command(about = "Define or override a crew member")]
+    Define(CrewDefineArgs),
+    #[command(about = "Remove a custom crew member definition")]
+    Forget(CrewForgetArgs),
+}
+
+#[derive(Debug, Args)]
+struct CrewTargetArgs {
+    #[arg(long, value_name = "REPOSITORY_URL")]
+    repo: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct CrewAssignArgs {
+    #[arg(value_name = "AGENT", required = true)]
+    agents: Vec<String>,
+    #[command(flatten)]
+    target: CrewTargetArgs,
+}
+
+#[derive(Debug, Args)]
+struct CrewDefineArgs {
+    #[arg(value_name = "AGENT")]
+    agent: String,
+    #[arg(long)]
+    name: String,
+    #[arg(long)]
+    email: String,
+}
+
+#[derive(Debug, Args)]
+struct CrewForgetArgs {
+    #[arg(value_name = "AGENT")]
+    agent: String,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1149,8 +1203,13 @@ fn run_stack_compatibility_merge(arguments: impl IntoIterator<Item = OsString>) 
     }
     let repository = stack::current_repository()?;
     let pull_request = stack::resolve_compatibility_merge_target(&repository, args.target)?;
-    let resource_url =
-        stack::merge_pull_request(&repository.owner, &repository.name, pull_request)?;
+    let commit_message = crew::merge_message(&repository)?;
+    let resource_url = stack::merge_pull_request(
+        &repository.owner,
+        &repository.name,
+        pull_request,
+        commit_message.as_deref(),
+    )?;
     writeln!(io::stdout().lock(), "{resource_url}")?;
     Ok(())
 }
@@ -1167,6 +1226,7 @@ fn run(cli: Cli) -> Result<()> {
         Commands::Stack { arguments } => exit_with_stack_command(arguments),
         Commands::StackApi { command } => run_stack_api(command, cli.json),
         Commands::Commit { command } => run_commit(command, cli.json),
+        Commands::Crew { command } => run_crew(command, cli.json),
         Commands::Wiki { command } => run_wiki(command, cli.json),
         Commands::Repository { command } => run_repository(command, cli.json),
         Commands::Ref { command } => run_git_ref(command, cli.json),
@@ -1732,6 +1792,99 @@ fn run_commit(command: CommitCommand, json: bool) -> Result<()> {
     }
 }
 
+fn run_crew(command: CrewCommand, json: bool) -> Result<()> {
+    let path = crew::config_path()?;
+    match command {
+        CrewCommand::Path => {
+            if json {
+                emit_json(&serde_json::json!({"path": path}))
+            } else {
+                writeln!(io::stdout().lock(), "{}", path.display())?;
+                Ok(())
+            }
+        }
+        CrewCommand::Agents => {
+            let members = crew::Config::load(&path)?.agents();
+            if json {
+                return emit_json(&members);
+            }
+            let mut stdout = io::stdout().lock();
+            for member in members {
+                writeln!(stdout, "{}\t{}", member.agent, member.trailer)?;
+            }
+            Ok(())
+        }
+        CrewCommand::Show(args) => {
+            let repository = crew_repository(&args)?;
+            emit_assignment(&crew::Config::load(&path)?.assignment(&repository)?, json)
+        }
+        CrewCommand::Assign(args) => {
+            let repository = crew_repository(&args.target)?;
+            let mut config = crew::Config::load(&path)?;
+            config.assign(&repository, args.agents)?;
+            config.save(&path)?;
+            emit_assignment(&config.assignment(&repository)?, json)
+        }
+        CrewCommand::Clear(args) => {
+            let repository = crew_repository(&args)?;
+            let mut config = crew::Config::load(&path)?;
+            config.clear(&repository)?;
+            config.save(&path)?;
+            emit_assignment(&config.assignment(&repository)?, json)
+        }
+        CrewCommand::Define(args) => {
+            let mut config = crew::Config::load(&path)?;
+            config.define(
+                &args.agent,
+                crew::Agent {
+                    name: args.name,
+                    email: args.email,
+                },
+            )?;
+            config.save(&path)?;
+            let member = config
+                .agents()
+                .into_iter()
+                .find(|member| member.agent == args.agent)
+                .context("defined agent was not found")?;
+            if json {
+                emit_json(&member)
+            } else {
+                writeln!(io::stdout().lock(), "{}\t{}", member.agent, member.trailer)?;
+                Ok(())
+            }
+        }
+        CrewCommand::Forget(args) => {
+            let mut config = crew::Config::load(&path)?;
+            let removal = config.forget(&args.agent)?;
+            config.save(&path)?;
+            if json {
+                emit_json(&removal)
+            } else {
+                writeln!(io::stdout().lock(), "Removed {}", removal.agent)?;
+                Ok(())
+            }
+        }
+    }
+}
+
+fn crew_repository(args: &CrewTargetArgs) -> Result<Repository> {
+    args.repo
+        .as_deref()
+        .map_or_else(stack::current_repository, crew::parse_repository)
+}
+
+fn emit_assignment(assignment: &crew::Assignment, json: bool) -> Result<()> {
+    if json {
+        return emit_json(assignment);
+    }
+    let mut stdout = io::stdout().lock();
+    for member in &assignment.members {
+        writeln!(stdout, "{}", member.trailer)?;
+    }
+    Ok(())
+}
+
 fn run_wiki(command: WikiCommand, json: bool) -> Result<()> {
     match command {
         WikiCommand::Publish(args) => execute(
@@ -2091,7 +2244,8 @@ fn parse_workflow_inputs(values: &[String]) -> Result<BTreeMap<String, String>> 
 }
 
 fn execute(request: Request, dry_run: bool, json: bool) -> Result<()> {
-    let operation = request.prepare(dry_run)?;
+    let mut operation = request.prepare(dry_run)?;
+    crew::attach(&mut operation)?;
     if dry_run {
         return emit_json(&operation);
     }
@@ -2388,6 +2542,13 @@ fn capability_commands() -> Vec<String> {
         "stack-api.merge",
         "stack-api.merge-status",
         "commit.create",
+        "crew.path",
+        "crew.agents",
+        "crew.show",
+        "crew.assign",
+        "crew.clear",
+        "crew.define",
+        "crew.forget",
         "wiki.publish",
         "repository.dispatch",
         "ref.create",

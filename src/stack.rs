@@ -293,6 +293,7 @@ pub fn execute(operation: &Operation) -> Result<String> {
             repository,
             pull_request,
             stack_number,
+            commit_message,
         } => {
             let pull_request = if let Some(pull_request) = pull_request {
                 *pull_request
@@ -301,7 +302,7 @@ pub fn execute(operation: &Operation) -> Result<String> {
                 let remote = get_parts(owner, repository, stack_number)?;
                 top_pull_request(&remote)?
             };
-            merge_pull_request(owner, repository, pull_request)
+            merge_pull_request(owner, repository, pull_request, commit_message.as_deref())
         }
         _ => bail!("operation {} is not a stack operation", operation.name()),
     }
@@ -325,10 +326,11 @@ pub fn merge_pull_request(
     owner: &str,
     repository: &str,
     pull_request: NonZeroU64,
+    commit_message: Option<&str>,
 ) -> Result<String> {
     let head_sha = stacked_head_sha(owner, repository, pull_request)?
         .with_context(|| format!("pull request #{pull_request} is not part of a stack"))?;
-    merge_known_stack_pull_request(owner, repository, pull_request, &head_sha)
+    merge_known_stack_pull_request(owner, repository, pull_request, &head_sha, commit_message)
 }
 
 pub fn merge_known_stack_pull_request(
@@ -336,18 +338,19 @@ pub fn merge_known_stack_pull_request(
     repository: &str,
     pull_request: NonZeroU64,
     head_sha: &str,
+    commit_message: Option<&str>,
 ) -> Result<String> {
     validate_head_sha(head_sha)?;
     let path = format!("repos/{owner}/{repository}/pulls/{pull_request}/merge-async");
-    let mut result = merge_request(
-        "PUT",
-        &path,
-        Some(&json!({
-            "merge_method": "squash",
-            "merge_action": "direct_merge",
-            "sha": head_sha
-        })),
-    )?;
+    let mut request = json!({
+        "merge_method": "squash",
+        "merge_action": "direct_merge",
+        "sha": head_sha
+    });
+    if let Some(message) = commit_message {
+        request["commit_message"] = json!(message);
+    }
+    let mut result = merge_request("PUT", &path, Some(&request))?;
     for attempt in 0..=MERGE_POLL_ATTEMPTS {
         match result.status.as_str() {
             "merged" => {

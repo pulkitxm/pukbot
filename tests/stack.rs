@@ -37,7 +37,7 @@ const STACK: &str = r#"{
 }"#;
 
 struct FakeGh {
-    _directory: TempDir,
+    directory: TempDir,
     executable_directory: PathBuf,
     log: PathBuf,
 }
@@ -59,7 +59,7 @@ impl FakeGh {
         fs::set_permissions(&executable, permissions).expect("fake gh should be executable");
         let log = directory.path().join("gh.log");
         Self {
-            _directory: directory,
+            directory,
             executable_directory,
             log,
         }
@@ -103,7 +103,8 @@ impl FakeGh {
         command
             .args(arguments)
             .env("PATH", self.path())
-            .env("PUKBOT_FAKE_GH_LOG", &self.log);
+            .env("PUKBOT_FAKE_GH_LOG", &self.log)
+            .env("PUKBOT_CONFIG", self.directory.path().join("config.json"));
         command
     }
 }

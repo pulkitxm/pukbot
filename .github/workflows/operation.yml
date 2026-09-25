@@ -299,14 +299,16 @@ jobs:
               if [ -z "${stack_number}" ]; then
                 title=$(jq -r .title <<<"${pull_request}")
                 commit_title="${title} (#${number})"
-                jq -n --arg title "${commit_title}" \
-                  '{merge_method: "squash", commit_title: $title, commit_message: ""}' >request.json
+                jq --arg title "${commit_title}" \
+                  '{merge_method: "squash", commit_title: $title, commit_message: (.commit_message // "")}' \
+                  payload.json >request.json
                 gh api --method PUT "repos/${slug}/pulls/${number}/merge" --input request.json >/dev/null
               else
                 head_sha=$(jq -er '.head.sha | select(test("^[A-Fa-f0-9]{1,128}$"))' \
                   <<<"${pull_request}")
-                jq -n --arg sha "${head_sha}" \
-                  '{merge_method: "squash", merge_action: "direct_merge", sha: $sha}' >request.json
+                jq --arg sha "${head_sha}" \
+                  '{merge_method: "squash", merge_action: "direct_merge", sha: $sha, commit_message}
+                  | with_entries(select(.value != null))' payload.json >request.json
                 set +e
                 merge=$(gh api --method PUT "repos/${slug}/pulls/${number}/merge-async" \
                   --input request.json 2>merge-error.txt)

@@ -778,6 +778,7 @@ impl Request {
                     as_app,
                     delete_branch,
                     auto_merge,
+                    commit_message: None,
                 })
             }
             Self::PullRequestReady { repository, number } => Ok(Operation::PullRequestReady {
@@ -938,6 +939,7 @@ impl Request {
                     repository: repository.name,
                     pull_request,
                     stack_number,
+                    commit_message: None,
                 })
             }
             Self::CommitCreate {
@@ -1386,6 +1388,7 @@ pub enum Operation {
         as_app: bool,
         delete_branch: bool,
         auto_merge: bool,
+        commit_message: Option<String>,
     },
     PullRequestReady {
         owner: String,
@@ -1473,6 +1476,7 @@ pub enum Operation {
         repository: String,
         pull_request: Option<NonZeroU64>,
         stack_number: Option<NonZeroU64>,
+        commit_message: Option<String>,
     },
     CommitCreate {
         owner: String,

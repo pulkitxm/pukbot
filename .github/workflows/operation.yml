@@ -43,6 +43,12 @@ jobs:
           permission-contents: write
           permission-issues: write
           permission-pull-requests: write
+          permission-workflows: >-
+            ${{
+              fromJSON(inputs.payload).operation == 'commit_create' &&
+              contains(toJSON(fromJSON(inputs.payload).files.*.path), '".github/workflows/') &&
+              'write' || ''
+            }}
       - id: deployment-token
         if: ${{ startsWith(fromJSON(inputs.payload).operation, 'deployment_') }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
@@ -405,12 +411,17 @@ jobs:
               for i in $(seq 0 $((count - 1))); do
                 path=$(jq -er ".files[$i].path" payload.json)
                 delete=$(jq -r ".files[$i].delete" payload.json)
+                mode=$(jq -er --argjson i "${i}" \
+                  '.files[$i].mode // "100644" | select(. == "100644" or . == "100755" or . == "120000")' payload.json)
+                encoding=$(jq -er --argjson i "${i}" \
+                  '.files[$i].encoding // "utf-8" | select(. == "utf-8" or . == "base64")' payload.json)
                 if [ "${delete}" = "true" ]; then
                   entry=$(jq -n --arg path "${path}" '{path: $path, mode: "100644", type: "blob", sha: null}')
                 else
                   jq -j ".files[$i].content" payload.json >content.txt
-                  blob_sha=$(gh api --method POST "repos/${slug}/git/blobs" -F content=@content.txt -f encoding=utf-8 --jq .sha)
-                  entry=$(jq -n --arg path "${path}" --arg sha "${blob_sha}" '{path: $path, mode: "100644", type: "blob", sha: $sha}')
+                  blob_sha=$(gh api --method POST "repos/${slug}/git/blobs" -F content=@content.txt -f encoding="${encoding}" --jq .sha)
+                  entry=$(jq -n --arg path "${path}" --arg mode "${mode}" --arg sha "${blob_sha}" \
+                    '{path: $path, mode: $mode, type: "blob", sha: $sha}')
                 fi
                 entries=$(jq -c --argjson entry "${entry}" '. + [$entry]' <<<"${entries}")
               done

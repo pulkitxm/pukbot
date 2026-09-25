@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
-use crate::model::{Operation, Reaction, ReviewEvent};
+use crate::model::{CommitFile, Operation, Reaction, ReviewEvent};
 use crate::stack;
 
 pub fn runs_locally(operation: &Operation) -> bool {
@@ -13,7 +13,8 @@ pub fn runs_locally(operation: &Operation) -> bool {
         | Operation::PullRequestEdit { as_app, .. }
         | Operation::PullRequestMerge { as_app, .. }
         | Operation::PullRequestReview { as_app, .. }
-        | Operation::PullRequestUpdateBranch { as_app, .. } => !as_app,
+        | Operation::PullRequestUpdateBranch { as_app, .. }
+        | Operation::CommitCreate { as_app, .. } => !as_app,
         Operation::PullRequestClose { .. }
         | Operation::PullRequestReopen { .. }
         | Operation::PullRequestReady { .. }
@@ -309,6 +310,14 @@ pub fn execute(operation: &Operation) -> Result<String> {
             repository,
             number,
         } => disable_auto_merge(owner, repository, number.get()),
+        Operation::CommitCreate {
+            owner,
+            repository,
+            branch,
+            message,
+            files,
+            as_app: _,
+        } => create_commit(&slug(owner, repository), branch, message, files),
         Operation::StackCreate { .. }
         | Operation::StackAppend { .. }
         | Operation::StackUnstack { .. }
@@ -318,6 +327,58 @@ pub fn execute(operation: &Operation) -> Result<String> {
             operation.name()
         ),
     }
+}
+
+fn create_commit(slug: &str, branch: &str, message: &str, files: &[CommitFile]) -> Result<String> {
+    let base = api(
+        "GET",
+        &format!("repos/{slug}/git/ref/heads/{branch}"),
+        None,
+        Some(".object.sha"),
+    )?;
+    let base_tree = api(
+        "GET",
+        &format!("repos/{slug}/git/commits/{base}"),
+        None,
+        Some(".tree.sha"),
+    )?;
+    let mut entries = Vec::with_capacity(files.len());
+    for file in files {
+        let sha = match &file.content {
+            Some(content) if !file.delete => json!(api(
+                "POST",
+                &format!("repos/{slug}/git/blobs"),
+                Some(&json!({"content": content, "encoding": file.encoding})),
+                Some(".sha"),
+            )?),
+            _ => Value::Null,
+        };
+        entries.push(json!({
+            "path": file.path,
+            "mode": file.mode,
+            "type": "blob",
+            "sha": sha,
+        }));
+    }
+    let tree = api(
+        "POST",
+        &format!("repos/{slug}/git/trees"),
+        Some(&json!({"base_tree": base_tree, "tree": entries})),
+        Some(".sha"),
+    )?;
+    let commit = api(
+        "POST",
+        &format!("repos/{slug}/git/commits"),
+        Some(&json!({"message": message, "tree": tree, "parents": [base]})),
+        Some(".sha"),
+    )?;
+    api(
+        "PATCH",
+        &format!("repos/{slug}/git/refs/heads/{branch}"),
+        Some(&json!({"sha": commit, "force": false})),
+        None,
+    )?;
+    Ok(format!("https://github.com/{slug}/commit/{commit}"))
 }
 
 fn disable_auto_merge(owner: &str, repository: &str, number: u64) -> Result<String> {

@@ -11,6 +11,7 @@ use crate::model::{MAX_COMMIT_MESSAGE_BYTES, Operation, Repository};
 
 const CONFIG_ENV: &str = "PUKBOT_CONFIG";
 const TRAILER_KEY: &str = "Co-authored-by";
+const OWNER_WILDCARD: &str = "*";
 const MAX_AGENT_KEY_BYTES: usize = 64;
 const MAX_IDENTITY_BYTES: usize = 256;
 const GITHUB_PREFIXES: [&str; 6] = [
@@ -197,7 +198,7 @@ impl Config {
 
     pub fn clear(&mut self, repository: &Repository) -> Result<bool> {
         let mut removed = false;
-        while let Some(key) = self.assigned_key(repository)? {
+        while let Some(key) = self.exact_key(repository)? {
             self.repositories.remove(&key);
             removed = true;
         }
@@ -250,6 +251,17 @@ impl Config {
     }
 
     fn assigned_key(&self, repository: &Repository) -> Result<Option<String>> {
+        if let Some(key) = self.exact_key(repository)? {
+            return Ok(Some(key));
+        }
+        let owner = Repository {
+            owner: repository.owner.clone(),
+            name: OWNER_WILDCARD.to_owned(),
+        };
+        self.exact_key(&owner)
+    }
+
+    fn exact_key(&self, repository: &Repository) -> Result<Option<String>> {
         for key in self.repositories.keys() {
             if same_repository(&parse_repository(key)?, repository) {
                 return Ok(Some(key.clone()));
@@ -326,6 +338,15 @@ pub fn parse_repository(value: &str) -> Result<Repository> {
         .unwrap_or(trimmed)
         .trim_end_matches('/');
     let path = path.strip_suffix(".git").unwrap_or(path);
+    if let Some(owner) = path.strip_suffix("/*") {
+        let repository = format!("{owner}/wildcard")
+            .parse::<Repository>()
+            .map_err(|error| anyhow!("{value}: {error}"))?;
+        return Ok(Repository {
+            owner: repository.owner,
+            name: OWNER_WILDCARD.to_owned(),
+        });
+    }
     path.parse::<Repository>()
         .map_err(|error| anyhow!("{value}: {error}"))
 }
@@ -544,6 +565,54 @@ mod tests {
                 .expect("trailers should resolve"),
             Vec::<String>::new()
         );
+    }
+
+    #[test]
+    fn owner_wildcards_apply_unless_a_repository_is_listed() {
+        let mut config = config(
+            r#"{
+                "repositories": {
+                    "https://github.com/pulkitxm/*": ["cursor"],
+                    "pulkitxm/special": ["claude"]
+                }
+            }"#,
+        );
+        assert_eq!(
+            config
+                .trailers(&repository("PulkitXM/pukbot"))
+                .expect("trailers should resolve"),
+            vec![CURSOR.to_owned()]
+        );
+        assert_eq!(
+            config
+                .trailers(&repository("pulkitxm/special"))
+                .expect("trailers should resolve"),
+            vec!["Co-authored-by: Claude <noreply@anthropic.com>".to_owned()]
+        );
+        assert_eq!(
+            config
+                .trailers(&repository("someone/pukbot"))
+                .expect("trailers should resolve"),
+            Vec::<String>::new()
+        );
+        assert!(
+            !config
+                .clear(&repository("pulkitxm/pukbot"))
+                .expect("repository should clear")
+        );
+        assert!(
+            config
+                .clear(&parse_repository("pulkitxm/*").expect("wildcard should parse"))
+                .expect("wildcard should clear")
+        );
+        assert_eq!(
+            config
+                .trailers(&repository("pulkitxm/pukbot"))
+                .expect("trailers should resolve"),
+            Vec::<String>::new()
+        );
+        assert!(parse_repository("*/*").is_err());
+        assert!(parse_repository("pulkitxm/pu*").is_err());
     }
 
     #[test]

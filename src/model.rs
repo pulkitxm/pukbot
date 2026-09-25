@@ -158,6 +158,41 @@ pub struct CommentDocument {
     pub media: Vec<media::MediaInput>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum FileMode {
+    #[default]
+    #[serde(rename = "100644")]
+    Regular,
+    #[serde(rename = "100755")]
+    Executable,
+    #[serde(rename = "120000")]
+    Symlink,
+}
+
+impl FromStr for FileMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "100644" => Ok(Self::Regular),
+            "100755" => Ok(Self::Executable),
+            "120000" => Ok(Self::Symlink),
+            _ => Err(format!(
+                "git mode {value} is not supported; commit regular files, executables, or symlinks"
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum ContentEncoding {
+    #[default]
+    #[serde(rename = "utf-8")]
+    Utf8,
+    #[serde(rename = "base64")]
+    Base64,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommitFileDocument {
@@ -165,6 +200,10 @@ pub struct CommitFileDocument {
     pub content: Option<String>,
     #[serde(default)]
     pub delete: bool,
+    #[serde(default)]
+    pub mode: FileMode,
+    #[serde(default)]
+    pub encoding: ContentEncoding,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -172,6 +211,8 @@ pub struct CommitFile {
     pub path: String,
     pub content: Option<String>,
     pub delete: bool,
+    pub mode: FileMode,
+    pub encoding: ContentEncoding,
 }
 
 #[derive(Debug, Deserialize)]
@@ -956,7 +997,7 @@ impl Request {
                     repository: repository.name,
                     branch,
                     message,
-                    files: prepare_commit_files(files)?,
+                    files: prepare_commit_files(files, as_app)?,
                     as_app,
                 })
             }
@@ -2216,12 +2257,12 @@ fn prepare_wiki_delete_paths(paths: Vec<String>) -> Result<Vec<String>> {
     Ok(paths)
 }
 
-fn prepare_commit_files(files: Vec<CommitFileDocument>) -> Result<Vec<CommitFile>> {
+fn prepare_commit_files(files: Vec<CommitFileDocument>, as_app: bool) -> Result<Vec<CommitFile>> {
     if files.is_empty() {
         bail!("commit requires at least one file");
     }
-    if files.len() > MAX_COMMIT_FILES {
-        bail!("commit supports at most {MAX_COMMIT_FILES} files");
+    if as_app && files.len() > MAX_COMMIT_FILES {
+        bail!("app-authored commits support at most {MAX_COMMIT_FILES} files");
     }
     let mut seen = HashSet::new();
     let mut total = 0usize;
@@ -2242,26 +2283,39 @@ fn prepare_commit_files(files: Vec<CommitFileDocument>) -> Result<Vec<CommitFile
                 path: file.path,
                 content: None,
                 delete: true,
+                mode: file.mode,
+                encoding: file.encoding,
             });
             continue;
         }
         let Some(content) = file.content else {
             bail!("commit file {} requires content or delete", file.path);
         };
-        if content.len() > MAX_COMMIT_FILE_BYTES {
+        if file.encoding == ContentEncoding::Base64
+            && base64::engine::general_purpose::STANDARD
+                .decode(&content)
+                .is_err()
+        {
+            bail!("commit file {} is not valid base64", file.path);
+        }
+        if as_app && content.len() > MAX_COMMIT_FILE_BYTES {
             bail!(
-                "commit file {} exceeds {MAX_COMMIT_FILE_BYTES} bytes",
+                "commit file {} exceeds {MAX_COMMIT_FILE_BYTES} bytes, the limit for app-authored commits",
                 file.path
             );
         }
         total += content.len();
-        if total > MAX_COMMIT_TOTAL_BYTES {
-            bail!("commit files exceed {MAX_COMMIT_TOTAL_BYTES} bytes combined");
+        if as_app && total > MAX_COMMIT_TOTAL_BYTES {
+            bail!(
+                "commit files exceed {MAX_COMMIT_TOTAL_BYTES} bytes combined, the limit for app-authored commits"
+            );
         }
         prepared.push(CommitFile {
             path: file.path,
             content: Some(content),
             delete: false,
+            mode: file.mode,
+            encoding: file.encoding,
         });
     }
     Ok(prepared)
@@ -2589,6 +2643,24 @@ mod tests {
         )
         .expect("request should parse");
         assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn carries_commit_file_modes_into_the_payload() {
+        let request = serde_json::from_str::<Request>(
+            r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"m","files":[{"path":"run.sh","content":"x","mode":"100755"},{"path":"a.txt","content":"y"}]}"#,
+        )
+        .expect("request should parse");
+        let payload = serde_json::to_value(request.prepare(true).expect("request should prepare"))
+            .expect("operation should serialize");
+        assert_eq!(payload["files"][0]["mode"], "100755");
+        assert_eq!(payload["files"][1]["mode"], "100644");
+        assert!(
+            serde_json::from_str::<Request>(
+                r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"m","files":[{"path":"sub","content":"x","mode":"160000"}]}"#,
+            )
+            .is_err()
+        );
     }
 
     #[test]

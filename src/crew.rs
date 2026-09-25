@@ -538,11 +538,11 @@ mod tests {
                 "Co-authored-by: Acme Bot <bot@acme.dev>".to_owned()
             ]
         );
-        assert!(
+        assert_eq!(
             config
                 .trailers(&repository("pulkitxm/other"))
-                .expect("trailers should resolve")
-                .is_empty()
+                .expect("trailers should resolve"),
+            Vec::<String>::new()
         );
     }
 
@@ -608,11 +608,11 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory should be created");
         let config =
             Config::load(&directory.path().join("absent.json")).expect("config should load");
-        assert!(
+        assert_eq!(
             config
                 .trailers(&repository("owner/repo"))
-                .expect("trailers should resolve")
-                .is_empty()
+                .expect("trailers should resolve"),
+            Vec::<String>::new()
         );
     }
 

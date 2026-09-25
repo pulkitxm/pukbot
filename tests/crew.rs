@@ -371,5 +371,5 @@ fn reports_an_invalid_manifest() {
     let output = harness.run(&["pr", "merge", "7", "--repo", "owner/repo", "--dry-run"]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("unknown agent ghost"));
-    assert!(harness.log().is_empty());
+    assert_eq!(harness.log(), "");
 }

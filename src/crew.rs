@@ -22,15 +22,47 @@ const GITHUB_PREFIXES: [&str; 6] = [
     "github.com/",
 ];
 
-const BUILT_IN_AGENTS: [(&str, &str, &str); 4] = [
+const BUILT_IN_AGENTS: [(&str, &str, &str); 20] = [
+    ("aider", "aider", "aider@aider.chat"),
+    ("amp", "Amp", "amp@ampcode.com"),
     ("claude", "Claude", "noreply@anthropic.com"),
-    ("codex", "Codex", "codex@openai.com"),
+    ("codebuff", "Codebuff", "noreply@codebuff.com"),
+    ("codex", "Codex", "noreply@openai.com"),
+    ("continue", "Continue", "noreply@continue.dev"),
     (
         "copilot",
         "Copilot",
         "198982749+Copilot@users.noreply.github.com",
     ),
+    ("crush", "Crush", "crush@charm.land"),
     ("cursor", "Cursor", "cursoragent@cursor.com"),
+    (
+        "devin",
+        "Devin",
+        "158243242+devin-ai-integration[bot]@users.noreply.github.com",
+    ),
+    (
+        "factory",
+        "factory-droid[bot]",
+        "138933559+factory-droid[bot]@users.noreply.github.com",
+    ),
+    (
+        "jules",
+        "google-labs-jules[bot]",
+        "161369871+google-labs-jules[bot]@users.noreply.github.com",
+    ),
+    ("junie", "Junie", "junie@jetbrains.com"),
+    (
+        "kiro",
+        "Kiro Agent",
+        "244629292+kiro-agent@users.noreply.github.com",
+    ),
+    ("opencode", "opencode", "noreply@opencode.ai"),
+    ("openhands", "openhands", "openhands@all-hands.dev"),
+    ("pi", "pi", "noreply@pi.dev"),
+    ("qwen", "Qwen-Coder", "qwen-coder@alibabacloud.com"),
+    ("vibe", "Mistral Vibe", "vibe@mistral.ai"),
+    ("warp", "Warp", "agent@warp.dev"),
 ];
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -449,7 +481,10 @@ mod tests {
     use std::num::NonZeroU64;
     use std::path::PathBuf;
 
-    use super::{Agent, Config, append_trailers, parse_repository, resolve_config_path, sign};
+    use super::{
+        Agent, BUILT_IN_AGENTS, Config, append_trailers, parse_repository, resolve_config_path,
+        sign, validate_agent,
+    };
     use crate::model::{Operation, Repository};
 
     const CURSOR: &str = "Co-authored-by: Cursor <cursoragent@cursor.com>";
@@ -543,6 +578,29 @@ mod tests {
             std::fs::write(&path, json).expect("config should be written");
             assert!(Config::load(&path).is_err(), "{json}");
         }
+    }
+
+    #[test]
+    fn built_in_agents_are_valid_sorted_and_unique() {
+        for window in BUILT_IN_AGENTS.windows(2) {
+            assert!(
+                window[0].0 < window[1].0,
+                "{} must sort before {}",
+                window[0].0,
+                window[1].0
+            );
+        }
+        for (key, name, email) in BUILT_IN_AGENTS {
+            validate_agent(
+                key,
+                &Agent {
+                    name: name.to_owned(),
+                    email: email.to_owned(),
+                },
+            )
+            .expect("built-in agent should be valid");
+        }
+        assert_eq!(Config::default().agents().len(), BUILT_IN_AGENTS.len());
     }
 
     #[test]

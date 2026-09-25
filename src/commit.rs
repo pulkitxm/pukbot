@@ -3,8 +3,16 @@ use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
 use base64::Engine as _;
+use serde::Serialize;
 
-use crate::model::{CommitFileDocument, ContentEncoding, FileMode};
+use crate::crew;
+use crate::model::{CommitFileDocument, ContentEncoding, FileMode, Repository};
+
+#[derive(Debug, Serialize)]
+pub struct LocalSync {
+    pub synced: bool,
+    pub detail: String,
+}
 
 pub fn staged_files(paths: &[PathBuf]) -> Result<Vec<CommitFileDocument>> {
     let root = repository_root()?;
@@ -83,6 +91,88 @@ fn staged_files_at(root: &Path, paths: &[PathBuf]) -> Result<Vec<CommitFileDocum
     Ok(entries)
 }
 
+pub fn sync(repository: &Repository, branch: &str, commit_url: Option<&str>) -> LocalSync {
+    match repository_root().and_then(|root| sync_at(&root, repository, branch, commit_url)) {
+        Ok(detail) => LocalSync {
+            synced: true,
+            detail,
+        },
+        Err(error) => LocalSync {
+            synced: false,
+            detail: format!("{error:#}"),
+        },
+    }
+}
+
+fn sync_at(
+    root: &Path,
+    repository: &Repository,
+    branch: &str,
+    commit_url: Option<&str>,
+) -> Result<String> {
+    let commit = commit_url
+        .and_then(|url| url.rsplit_once("/commit/"))
+        .map(|(_, sha)| sha)
+        .context("the commit URL was missing, so the local branch was left untouched")?;
+    let current = git(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .context("the checkout is not on a branch, so it was left untouched")?;
+    if current != branch {
+        bail!("the checkout is on {current}, not {branch}, so it was left untouched");
+    }
+    let remote = remote_for(root, repository)?;
+    git(
+        root,
+        &["fetch", "--quiet", &remote, &format!("refs/heads/{branch}")],
+    )?;
+    if git(root, &["rev-parse", "FETCH_HEAD"])? != commit {
+        bail!(
+            "{remote}/{branch} already moved past {commit}; reconcile it with git fetch and rebase"
+        );
+    }
+    let head = git(root, &["rev-parse", "HEAD"])?;
+    if git(root, &["rev-parse", &format!("{commit}^")])? != head {
+        bail!(
+            "local HEAD {head} is not the parent of {commit}; reconcile it with git fetch and rebase"
+        );
+    }
+    git(root, &["reset", "--quiet", "--soft", commit])?;
+    Ok(format!(
+        "{branch} now points at {commit}; the index and working tree were not touched"
+    ))
+}
+
+fn remote_for(root: &Path, repository: &Repository) -> Result<String> {
+    for remote in git(root, &["remote"])?.lines() {
+        let url = git(root, &["config", "--get", &format!("remote.{remote}.url")])?;
+        if crew::parse_repository(&url)
+            .is_ok_and(|candidate| crew::same_repository(&candidate, repository))
+        {
+            return Ok(remote.to_owned());
+        }
+    }
+    bail!("no git remote points at {repository}, so the local branch was left untouched")
+}
+
+fn git(root: &Path, args: &[&str]) -> Result<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .context("failed to run git")?;
+    if !output.status.success() {
+        bail!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8(output.stdout)
+        .context("git returned non-UTF-8 output")?
+        .trim()
+        .to_owned())
+}
+
 fn repository_root() -> Result<PathBuf> {
     let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
@@ -122,7 +212,7 @@ mod tests {
     use std::fs;
     use std::process::Command;
 
-    use super::staged_files_at;
+    use super::{staged_files_at, sync_at};
 
     fn init_repo() -> tempfile::TempDir {
         let directory = tempfile::tempdir().expect("temporary directory should be created");
@@ -237,6 +327,78 @@ mod tests {
             Some((FileMode::Symlink, Some("plain.txt".to_owned())))
         );
         assert_eq!(files.len(), 3);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn syncs_the_local_branch_without_touching_the_working_tree() {
+        let remote = tempfile::tempdir().expect("remote directory should be created");
+        let git_in = |directory: &std::path::Path, args: &[&str]| -> String {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(directory)
+                .args(args)
+                .output()
+                .expect("git should run");
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_owned()
+        };
+        git_in(remote.path(), &["init", "-q", "--bare", "-b", "main"]);
+        let rewrite = format!("url.{}.insteadOf", remote.path().display());
+        let clone = |directory: &std::path::Path| {
+            git_in(directory, &["init", "-q", "-b", "main"]);
+            git_in(directory, &["config", "user.email", "test@example.com"]);
+            git_in(directory, &["config", "user.name", "Test"]);
+            git_in(
+                directory,
+                &["config", &rewrite, "https://github.com/owner/repo.git"],
+            );
+            git_in(
+                directory,
+                &[
+                    "remote",
+                    "add",
+                    "upstream",
+                    "https://github.com/owner/repo.git",
+                ],
+            );
+        };
+        let local = tempfile::tempdir().expect("local directory should be created");
+        clone(local.path());
+        fs::write(local.path().join("kept.txt"), "one\n").expect("file should be written");
+        git_in(local.path(), &["add", "kept.txt"]);
+        git_in(local.path(), &["commit", "-q", "-m", "init"]);
+        git_in(local.path(), &["push", "-q", "upstream", "main"]);
+
+        let other = tempfile::tempdir().expect("other directory should be created");
+        clone(other.path());
+        git_in(other.path(), &["pull", "-q", "upstream", "main"]);
+        fs::write(other.path().join("kept.txt"), "two\n").expect("file should be written");
+        git_in(other.path(), &["commit", "-q", "-am", "remote commit"]);
+        git_in(other.path(), &["push", "-q", "upstream", "main"]);
+        let commit = git_in(other.path(), &["rev-parse", "HEAD"]);
+        let url = format!("https://github.com/owner/repo/commit/{commit}");
+        let repository = "owner/repo".parse().expect("repository should parse");
+
+        fs::write(local.path().join("kept.txt"), "two\n").expect("file should be written");
+        git_in(local.path(), &["add", "kept.txt"]);
+        fs::write(local.path().join("draft.txt"), "unsaved\n").expect("file should be written");
+
+        git_in(local.path(), &["checkout", "-q", "-b", "elsewhere"]);
+        assert!(sync_at(local.path(), &repository, "main", Some(&url)).is_err());
+        git_in(local.path(), &["checkout", "-q", "main"]);
+
+        sync_at(local.path(), &repository, "main", Some(&url)).expect("branch should sync");
+        assert_eq!(git_in(local.path(), &["rev-parse", "HEAD"]), commit);
+        assert_eq!(
+            git_in(local.path(), &["status", "--porcelain"]),
+            "?? draft.txt"
+        );
+        assert!(sync_at(local.path(), &repository, "main", Some(&url)).is_err());
     }
 
     #[test]

@@ -51,6 +51,25 @@ Put command output, logs, diffs, and JSON inside a fenced code block with a
 language. Every fence must be closed. Prefer --body-file for anything longer
 than one line, because a shell mangles backticks and newlines.";
 
+const COMMIT_CREATE_LONG_HELP: &str = "Commit the staged changes to a branch on GitHub.
+
+Stage with git add first. Pukbot reads every staged path, or only the PATH
+arguments, from the index with its content and git mode, so executables,
+symlinks, binary files, and .github/workflows edits all land as staged.
+
+By default the commit is created through your gh session, so you are its
+author and committer. With --as-app the Pukbot App commits for you through its
+workflow, which limits each file to 60,000 bytes and needs the App's Workflows
+permission for .github/workflows edits.
+
+The commit lands on top of the branch head on GitHub. When the current checkout
+is on that branch and its HEAD is the new commit's parent, Pukbot fetches it and
+moves the local branch with git reset --soft, so the index and working tree are
+never touched and nothing is lost. The result reports this as localSync. If the
+local branch is left untouched, reconcile it with git fetch and git rebase, never
+git reset --hard, because a failed or partial commit leaves your edits only in
+the working tree.";
+
 const BODY_FILE_LONG_HELP: &str =
     "Read the GitHub-flavored Markdown body from a file, or from standard input when the path is -.
 
@@ -293,6 +312,7 @@ enum StackApiCommand {
 
 #[derive(Debug, Subcommand)]
 enum CommitCommand {
+    #[command(long_about = COMMIT_CREATE_LONG_HELP)]
     Create(CommitCreateArgs),
 }
 
@@ -1087,6 +1107,8 @@ struct MutationResult {
     authored_by: &'static str,
     workflow_url: Option<String>,
     resource_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    local_sync: Option<commit::LocalSync>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1777,17 +1799,29 @@ fn run_commit(command: CommitCommand, json: bool) -> Result<()> {
     match command {
         CommitCommand::Create(args) => {
             let files = commit::staged_files(&args.paths)?;
-            execute(
-                Request::CommitCreate {
-                    repository: args.repo,
-                    branch: args.branch,
-                    message: read_message(&args.content)?,
-                    files,
-                    as_app: args.as_app,
-                },
-                args.dry_run,
-                json,
-            )
+            let request = Request::CommitCreate {
+                repository: args.repo.clone(),
+                branch: args.branch.clone(),
+                message: read_message(&args.content)?,
+                files,
+                as_app: args.as_app,
+            };
+            if args.dry_run {
+                return execute(request, true, json);
+            }
+            let mut operation = request.prepare(false)?;
+            crew::attach(&mut operation)?;
+            let mut output = perform_operation(&operation, !json)?;
+            output.local_sync = Some(commit::sync(
+                &args.repo,
+                &args.branch,
+                output.resource_url.as_deref(),
+            ));
+            if json {
+                emit_json(&output)
+            } else {
+                emit_text_result(&output)
+            }
         }
     }
 }
@@ -2264,6 +2298,7 @@ fn perform_operation(operation: &model::Operation, stream: bool) -> Result<Mutat
             authored_by: "user",
             workflow_url: None,
             resource_url: Some(local::execute(operation)?),
+            local_sync: None,
         })
     } else {
         let result = workflow::dispatch(operation, stream)?;
@@ -2272,6 +2307,7 @@ fn perform_operation(operation: &model::Operation, stream: bool) -> Result<Mutat
             authored_by: "pukbot",
             workflow_url: Some(result.workflow_url),
             resource_url: result.resource_url,
+            local_sync: None,
         })
     }
 }
@@ -2362,6 +2398,10 @@ fn emit_text_result(result: &MutationResult) -> Result<()> {
     }
     if let Some(url) = &result.resource_url {
         writeln!(stdout, "Result: {url}")?;
+    }
+    if let Some(sync) = &result.local_sync {
+        let state = if sync.synced { "synced" } else { "not synced" };
+        writeln!(stdout, "Local branch {state}: {}", sync.detail)?;
     }
     Ok(())
 }

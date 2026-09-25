@@ -485,7 +485,7 @@ fn repository_url(repository: &Repository) -> String {
     )
 }
 
-fn same_repository(left: &Repository, right: &Repository) -> bool {
+pub fn same_repository(left: &Repository, right: &Repository) -> bool {
     left.owner.eq_ignore_ascii_case(&right.owner) && left.name.eq_ignore_ascii_case(&right.name)
 }
 

@@ -311,6 +311,8 @@ fn initializes_an_empty_repository_with_staged_content_and_modes() {
     );
     let result: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
     let commit = git_output(&remote, &["rev-parse", "main"]);
+    assert_eq!(result["localSync"]["synced"], true);
+    assert_eq!(git_output(&repository, &["rev-parse", "HEAD"]), commit);
     assert_eq!(
         result["resourceUrl"],
         format!("https://github.com/owner/repo/commit/{commit}")
@@ -351,6 +353,11 @@ fn initializes_an_empty_repository_with_staged_content_and_modes() {
         fs::read_to_string(repository.join("src/main.py")).expect("source should exist"),
         "unstaged change\n"
     );
+    assert_eq!(
+        git_output(&repository, &["diff", "--cached", "--name-only"]),
+        ""
+    );
+    assert!(git_output(&repository, &["status", "--porcelain"]).contains("?? draft.txt"));
 }
 
 #[test]
@@ -371,6 +378,10 @@ fn initial_commit_honors_path_selection() {
     assert_eq!(
         git_output(&remote, &["ls-tree", "--name-only", "main"]),
         "included.txt"
+    );
+    assert_eq!(
+        git_output(&repository, &["diff", "--cached", "--name-only"]),
+        "excluded.txt"
     );
 }
 
@@ -442,4 +453,30 @@ fn initial_commit_rejects_a_concurrently_created_branch() {
     assert_eq!(git_output(&remote, &["rev-parse", "main"]), original);
     assert_eq!(git_output(&repository, &["rev-parse", "HEAD"]), original);
     assert_eq!(git_output(&repository, &["show", ":file.txt"]), "new");
+}
+
+#[test]
+fn leaves_existing_local_history_untouched_after_initializing_the_remote() {
+    let harness = Harness::with_behavior(EMPTY_BEHAVIOR);
+    let (repository, remote) = empty_repository(&harness);
+    git(&repository, &["config", "user.name", "Test"]);
+    git(&repository, &["config", "user.email", "test@example.com"]);
+    fs::write(repository.join("file.txt"), "original").expect("file should be written");
+    git(&repository, &["add", "."]);
+    git(&repository, &["commit", "-q", "-m", "local history"]);
+    let original = git_output(&repository, &["rev-parse", "HEAD"]);
+    fs::write(repository.join("file.txt"), "staged").expect("file should change");
+    git(&repository, &["add", "."]);
+    let output = harness.run_in(&repository, &initial_arguments());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let result: Value = serde_json::from_slice(&output.stdout).expect("stdout should be JSON");
+    assert_eq!(result["localSync"]["synced"], false);
+    assert_eq!(git_output(&repository, &["rev-parse", "HEAD"]), original);
+    assert_eq!(git_output(&repository, &["show", ":file.txt"]), "staged");
+    assert_eq!(git_output(&remote, &["show", "main:file.txt"]), "staged");
+    assert_eq!(git_output(&remote, &["rev-list", "--count", "main"]), "1");
 }

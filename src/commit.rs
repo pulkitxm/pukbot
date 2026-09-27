@@ -240,13 +240,29 @@ fn sync_at(
             "{remote}/{branch} already moved past {commit}; reconcile it with git fetch and rebase"
         );
     }
-    let head = git(root, &["rev-parse", "HEAD"])?;
-    if git(root, &["rev-parse", &format!("{commit}^")])? != head {
-        bail!(
-            "local HEAD {head} is not the parent of {commit}; reconcile it with git fetch and rebase"
-        );
+    let ancestry = git(root, &["rev-list", "--parents", "-n", "1", commit])?;
+    let mut ancestry = ancestry.split_whitespace();
+    ancestry.next();
+    if let Some(parent) = ancestry.next() {
+        let head = git(root, &["rev-parse", "HEAD"])?;
+        if parent != head {
+            bail!(
+                "local HEAD {head} is not the parent of {commit}; reconcile it with git fetch and rebase"
+            );
+        }
+        git(root, &["reset", "--quiet", "--soft", commit])?;
+    } else {
+        git(
+            root,
+            &[
+                "update-ref",
+                &format!("refs/heads/{branch}"),
+                commit,
+                &"0".repeat(commit.len()),
+            ],
+        )
+        .context("the local branch already has a commit, so it was left untouched")?;
     }
-    git(root, &["reset", "--quiet", "--soft", commit])?;
     Ok(format!(
         "{branch} now points at {commit}; the index and working tree were not touched"
     ))

@@ -1,12 +1,123 @@
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, anyhow, bail};
 use base64::Engine as _;
 use serde::Serialize;
 
 use crate::crew;
-use crate::model::{CommitFileDocument, ContentEncoding, FileMode, Repository};
+use crate::model::{CommitFile, CommitFileDocument, ContentEncoding, FileMode, Repository};
+
+pub fn create_initial(
+    slug: &str,
+    branch: &str,
+    message: &str,
+    files: &[CommitFile],
+    name: &str,
+    email: &str,
+) -> Result<String> {
+    if files.iter().any(|file| file.delete) {
+        bail!("cannot delete files from an empty repository");
+    }
+    let directory = tempfile::tempdir().context("failed to create the initial commit workspace")?;
+    let run = |args: &[&str], input: &[u8]| initial_git(directory.path(), args, input, name, email);
+    let reference = format!("refs/heads/{branch}");
+    run(&["check-ref-format", &reference], b"")?;
+    run(
+        &["init", "--quiet", "--bare", "--object-format=sha1", "."],
+        b"",
+    )?;
+    run(&["read-tree", "--empty"], b"")?;
+    let mut entries = Vec::new();
+    for file in files {
+        let content = file
+            .content
+            .as_deref()
+            .context("initial commit file content is missing")?;
+        let bytes = match file.encoding {
+            ContentEncoding::Utf8 => content.as_bytes().to_vec(),
+            ContentEncoding::Base64 => base64::engine::general_purpose::STANDARD
+                .decode(content)
+                .context("initial commit file contains invalid base64")?,
+        };
+        let sha = run(&["hash-object", "-w", "--stdin"], &bytes)?;
+        let mode = match file.mode {
+            FileMode::Regular => "100644",
+            FileMode::Executable => "100755",
+            FileMode::Symlink => "120000",
+        };
+        write!(entries, "{mode} blob {sha}\t{}\0", file.path)?;
+    }
+    run(&["update-index", "-z", "--index-info"], &entries)?;
+    let tree = run(&["write-tree"], b"")?;
+    let commit = run(&["commit-tree", &tree], message.as_bytes())?;
+    run(
+        &[
+            "-c",
+            "credential.helper=",
+            "-c",
+            "credential.https://github.com.helper=!gh auth git-credential",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "push",
+            "--quiet",
+            &format!("--force-with-lease={reference}:"),
+            &format!("https://github.com/{slug}.git"),
+            &format!("{commit}:{reference}"),
+        ],
+        b"",
+    )?;
+    Ok(format!("https://github.com/{slug}/commit/{commit}"))
+}
+
+fn initial_git(
+    root: &Path,
+    args: &[&str],
+    input: &[u8],
+    name: &str,
+    email: &str,
+) -> Result<String> {
+    let mut command = Command::new("git");
+    command.current_dir(root).args(args);
+    for variable in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    ] {
+        command.env_remove(variable);
+    }
+    let mut child = command
+        .env("GIT_AUTHOR_NAME", name)
+        .env("GIT_AUTHOR_EMAIL", email)
+        .env("GIT_COMMITTER_NAME", name)
+        .env("GIT_COMMITTER_EMAIL", email)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("failed to launch git for the initial commit")?;
+    child
+        .stdin
+        .take()
+        .context("failed to open git input")?
+        .write_all(input)?;
+    let output = child.wait_with_output().context("failed to wait for git")?;
+    if !output.status.success() {
+        bail!(
+            "initial commit failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8(output.stdout)
+        .context("git returned non-UTF-8 output")?
+        .trim()
+        .to_owned())
+}
 
 #[derive(Debug, Serialize)]
 pub struct LocalSync {
@@ -129,13 +240,29 @@ fn sync_at(
             "{remote}/{branch} already moved past {commit}; reconcile it with git fetch and rebase"
         );
     }
-    let head = git(root, &["rev-parse", "HEAD"])?;
-    if git(root, &["rev-parse", &format!("{commit}^")])? != head {
-        bail!(
-            "local HEAD {head} is not the parent of {commit}; reconcile it with git fetch and rebase"
-        );
+    let ancestry = git(root, &["rev-list", "--parents", "-n", "1", commit])?;
+    let mut ancestry = ancestry.split_whitespace();
+    ancestry.next();
+    if let Some(parent) = ancestry.next() {
+        let head = git(root, &["rev-parse", "HEAD"])?;
+        if parent != head {
+            bail!(
+                "local HEAD {head} is not the parent of {commit}; reconcile it with git fetch and rebase"
+            );
+        }
+        git(root, &["reset", "--quiet", "--soft", commit])?;
+    } else {
+        git(
+            root,
+            &[
+                "update-ref",
+                &format!("refs/heads/{branch}"),
+                commit,
+                &"0".repeat(commit.len()),
+            ],
+        )
+        .context("the local branch already has a commit, so it was left untouched")?;
     }
-    git(root, &["reset", "--quiet", "--soft", commit])?;
     Ok(format!(
         "{branch} now points at {commit}; the index and working tree were not touched"
     ))

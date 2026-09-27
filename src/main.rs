@@ -62,6 +62,11 @@ author and committer. With --as-app the Pukbot App commits for you through its
 workflow, which limits each file to 60,000 bytes and needs the App's Workflows
 permission for .github/workflows edits.
 
+For an empty repository, the default mode creates one root commit in a temporary
+Git repository and pushes it using your gh credentials. The branch must still be
+absent when it is pushed. A matching local branch with no commits is then synced
+without changing the index or working tree.
+
 The commit lands on top of the branch head on GitHub. When the current checkout
 is on that branch and its HEAD is the new commit's parent, Pukbot fetches it and
 moves the local branch with git reset --soft, so the index and working tree are

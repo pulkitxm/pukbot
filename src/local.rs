@@ -1,11 +1,11 @@
 use std::fmt::Write as _;
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
 use crate::model::{CommitFile, Operation, Reaction, ReviewEvent};
-use crate::stack;
+use crate::{commit, stack};
 
 pub fn runs_locally(operation: &Operation) -> bool {
     match operation {
@@ -330,12 +330,22 @@ pub fn execute(operation: &Operation) -> Result<String> {
 }
 
 fn create_commit(slug: &str, branch: &str, message: &str, files: &[CommitFile]) -> Result<String> {
-    let base = api(
-        "GET",
-        &format!("repos/{slug}/git/ref/heads/{branch}"),
-        None,
-        Some(".object.sha"),
-    )?;
+    let path = format!("repos/{slug}/git/ref/heads/{branch}");
+    let response = api_output("GET", &path, None, Some(".object.sha"))?;
+    if !response.status.success()
+        && String::from_utf8_lossy(&response.stderr).contains("Git Repository is empty. (HTTP 409)")
+    {
+        let user: Value = serde_json::from_str(&api("GET", "user", None, None)?)?;
+        let login = user["login"]
+            .as_str()
+            .context("GitHub user login is missing")?;
+        let name = user["name"].as_str().unwrap_or(login);
+        let id = user["id"].as_u64().context("GitHub user ID is missing")?;
+        let fallback_email = format!("{id}+{login}@users.noreply.github.com");
+        let email = user["email"].as_str().unwrap_or(&fallback_email);
+        return commit::create_initial(slug, branch, message, files, name, email);
+    }
+    let base = api_text(response, "GET", &path)?;
     let base_tree = api(
         "GET",
         &format!("repos/{slug}/git/commits/{base}"),
@@ -466,6 +476,15 @@ fn set_draft(owner: &str, repository: &str, number: u64, draft: bool) -> Result<
 }
 
 fn api(method: &str, path: &str, request: Option<&Value>, filter: Option<&str>) -> Result<String> {
+    api_text(api_output(method, path, request, filter)?, method, path)
+}
+
+fn api_output(
+    method: &str,
+    path: &str,
+    request: Option<&Value>,
+    filter: Option<&str>,
+) -> Result<Output> {
     let mut command = Command::new("gh");
     command.args(["api", "--method", method, path]);
     if request.is_some() {
@@ -486,7 +505,10 @@ fn api(method: &str, path: &str, request: Option<&Value>, filter: Option<&str>) 
     } else {
         drop(child.stdin.take());
     }
-    let output = child.wait_with_output().context("failed to wait for gh")?;
+    child.wait_with_output().context("failed to wait for gh")
+}
+
+fn api_text(output: Output, method: &str, path: &str) -> Result<String> {
     if !output.status.success() {
         bail!(
             "GitHub rejected {method} {path}: {}",

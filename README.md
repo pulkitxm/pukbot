@@ -360,6 +360,13 @@ toward your contributions. With `--as-app`, Pukbot is both author and
 committer; those identities are derived inside the workflow and cannot be set
 to an arbitrary name or email from the CLI.
 
+For an empty repository, the default mode creates the first commit and branch
+using your `gh` credentials. It preserves the selected staged files, binary
+content, executable bits, and symlinks. The upload fails if the target branch
+appears before it completes. When the matching local branch has no commits,
+Pukbot syncs it to the new root commit without changing the index or working
+tree. This initialization is not available with `--as-app`.
+
 ## Agent instructions
 
 Add this to `AGENTS.md`:

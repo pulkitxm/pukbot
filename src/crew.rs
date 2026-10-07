@@ -307,6 +307,9 @@ pub fn attach(operation: &mut Operation) -> Result<()> {
         Operation::CommitCreate {
             owner, repository, ..
         }
+        | Operation::RepositoryPrependRoot {
+            owner, repository, ..
+        }
         | Operation::WikiPublish {
             owner, repository, ..
         }
@@ -356,7 +359,9 @@ fn sign(operation: &mut Operation, trailers: &[String]) -> Result<()> {
         return Ok(());
     }
     match operation {
-        Operation::CommitCreate { message, .. } | Operation::WikiPublish { message, .. } => {
+        Operation::CommitCreate { message, .. }
+        | Operation::RepositoryPrependRoot { message, .. }
+        | Operation::WikiPublish { message, .. } => {
             *message = append_trailers(message, trailers);
             if message.len() > MAX_COMMIT_MESSAGE_BYTES {
                 bail!("commit message with its trailers exceeds {MAX_COMMIT_MESSAGE_BYTES} bytes");

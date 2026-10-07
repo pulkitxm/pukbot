@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
 use crate::model::{CommitFile, Operation, Reaction, ReviewEvent};
-use crate::{commit, stack};
+use crate::{commit, history_root, stack};
 
 pub fn runs_locally(operation: &Operation) -> bool {
     match operation {
@@ -26,6 +26,7 @@ pub fn runs_locally(operation: &Operation) -> bool {
         | Operation::StackCreate { .. }
         | Operation::StackAppend { .. }
         | Operation::StackUnstack { .. }
+        | Operation::RepositoryPrependRoot { .. }
         | Operation::StackMerge { .. } => true,
         _ => false,
     }
@@ -37,6 +38,37 @@ pub fn runs_locally(operation: &Operation) -> bool {
 )]
 pub fn execute(operation: &Operation) -> Result<String> {
     match operation {
+        Operation::RepositoryPrependRoot {
+            owner,
+            repository,
+            branch,
+            backup_branch,
+            expected_head,
+            date,
+            message,
+        } => {
+            let user: Value = serde_json::from_str(&api("GET", "user", None, None)?)?;
+            let login = user["login"]
+                .as_str()
+                .context("GitHub user login is missing")?;
+            let id = user["id"].as_u64().context("GitHub user ID is missing")?;
+            let name = user["name"].as_str().unwrap_or(login);
+            let email = format!("{id}+{login}@users.noreply.github.com");
+            let slug = slug(owner, repository);
+            let rewritten = history_root::prepend_root(
+                &format!("https://github.com/{slug}.git"),
+                &history_root::RootInsertion {
+                    branch,
+                    backup_branch,
+                    expected_head,
+                    date,
+                    message,
+                },
+                name,
+                &email,
+            )?;
+            Ok(format!("https://github.com/{slug}/commit/{rewritten}"))
+        }
         Operation::PullRequestCreate {
             owner,
             repository,

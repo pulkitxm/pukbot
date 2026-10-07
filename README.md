@@ -254,6 +254,20 @@ pukbot tag create v1.2.3 --repo owner/repository --target COMMIT_SHA \
   --message "Release 1.2.3"
 ```
 
+Prepend a dated empty root to a branch with an atomic backup:
+
+```bash
+pukbot repository prepend-root --repo owner/repository --branch main \
+  --backup-branch backup/original --expected-head CURRENT_COMMIT_SHA \
+  --date 2025-01-01T00:00:00Z --message "chore: prepend retrospective history anchor" \
+  --dry-run --json
+```
+
+Execution requires `--yes`, Git, and `git-filter-repo` installed on `PATH`.
+Pukbot rewrites in an isolated clone, verifies each commit's tree, message,
+identity, dates, and merge ancestry, and publishes the backup and replacement
+together using exact ref leases. See [Repository history](docs/Operations.md#repository-history).
+
 Manage releases and upload assets as Pukbot:
 
 ```bash
@@ -340,6 +354,7 @@ Authored by you, executed through your local authenticated GitHub CLI session:
 - every `pr` operation, including `create`, `review`, and `merge`
 - every proxied gh-stack command and every `stack-api` mutation
 - `commit create`
+- `repository prepend-root`
 
 The pull request author, the reviewer, the merge event, and the squash commit
 on the base branch are all yours, so the work lands in your GitHub

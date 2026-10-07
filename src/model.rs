@@ -470,6 +470,16 @@ pub enum Request {
         repository: Repository,
         branch: String,
     },
+    RepositoryPrependRoot {
+        repository: Repository,
+        branch: String,
+        backup_branch: String,
+        expected_head: String,
+        date: String,
+        message: String,
+        #[serde(default)]
+        yes: bool,
+    },
     RefCreate {
         repository: Repository,
         #[serde(rename = "ref")]
@@ -1053,6 +1063,36 @@ impl Request {
                     branch,
                 })
             }
+            Self::RepositoryPrependRoot {
+                repository,
+                branch,
+                backup_branch,
+                expected_head,
+                date,
+                message,
+                yes,
+            } => {
+                if !dry_run && !yes {
+                    bail!("history rewriting requires --yes");
+                }
+                validate_branch(&branch)?;
+                validate_branch(&backup_branch)?;
+                if branch == backup_branch {
+                    bail!("the backup branch must differ from the rewritten branch");
+                }
+                validate_git_object_sha(&expected_head)?;
+                validate_commit_message(&message)?;
+                let date = crate::history_root::normalize_date(&date)?;
+                Ok(Operation::RepositoryPrependRoot {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    branch,
+                    backup_branch,
+                    expected_head,
+                    date,
+                    message,
+                })
+            }
             Self::RefCreate {
                 repository,
                 reference,
@@ -1559,6 +1599,15 @@ pub enum Operation {
         repository: String,
         branch: String,
     },
+    RepositoryPrependRoot {
+        owner: String,
+        repository: String,
+        branch: String,
+        backup_branch: String,
+        expected_head: String,
+        date: String,
+        message: String,
+    },
     RefCreate {
         owner: String,
         repository: String,
@@ -1713,6 +1762,7 @@ impl Operation {
             Self::WikiPublish { .. } => "wiki_publish",
             Self::RepositoryDispatch { .. } => "repository_dispatch",
             Self::RepositorySyncFork { .. } => "repository_sync_fork",
+            Self::RepositoryPrependRoot { .. } => "repository_prepend_root",
             Self::RefCreate { .. } => "ref_create",
             Self::RefDelete { .. } => "ref_delete",
             Self::TagCreate { .. } => "tag_create",
@@ -2601,6 +2651,7 @@ mod tests {
             r#"{"operation":"wiki_publish","repository":"owner/repo","message":"docs: publish wiki","source_ref":"main","source_path":"wiki","delete":["Old.md"],"replace":false}"#,
             r#"{"operation":"repository_dispatch","repository":"owner/repo","event_type":"apt-release","client_payload":{"version":"1.2.3"}}"#,
             r#"{"operation":"repository_sync_fork","repository":"owner/fork","branch":"main"}"#,
+            r#"{"operation":"repository_prepend_root","repository":"owner/repo","branch":"main","backup_branch":"backup/original","expected_head":"0123456789abcdef0123456789abcdef01234567","date":"2026-04-07T08:00:00Z","message":"chore: prepend history anchor"}"#,
             r#"{"operation":"ref_create","repository":"owner/repo","ref":"refs/heads/release","sha":"0123456789abcdef0123456789abcdef01234567"}"#,
             r#"{"operation":"ref_delete","repository":"owner/repo","ref":"refs/heads/release"}"#,
             r#"{"operation":"tag_create","repository":"owner/repo","tag":"v1.2.3","target":"0123456789abcdef0123456789abcdef01234567","message":"release 1.2.3"}"#,
@@ -2623,6 +2674,58 @@ mod tests {
             let operation = request.prepare(true).expect("request should prepare");
             assert_ne!(operation.name(), "");
         }
+    }
+
+    #[test]
+    fn validates_history_rewrite_contract_before_execution() {
+        let document = serde_json::json!({
+            "operation": "repository_prepend_root",
+            "repository": "owner/repo",
+            "branch": "main",
+            "backup_branch": "backup/original",
+            "expected_head": "0123456789abcdef0123456789abcdef01234567",
+            "date": "2026-04-07T13:30:00+05:30",
+            "message": "chore: prepend history anchor"
+        });
+        let request =
+            serde_json::from_value::<Request>(document.clone()).expect("request should parse");
+        assert!(
+            request
+                .prepare(false)
+                .expect_err("execution should require confirmation")
+                .to_string()
+                .contains("requires --yes")
+        );
+        let request =
+            serde_json::from_value::<Request>(document.clone()).expect("request should parse");
+        let operation = request
+            .prepare(true)
+            .expect("dry run should validate without confirmation");
+        assert_eq!(
+            serde_json::to_value(operation).expect("operation should serialize")["date"],
+            "2026-04-07T08:00:00Z"
+        );
+        for (key, value) in [
+            ("backup_branch", "main"),
+            ("branch", "../main"),
+            ("expected_head", "short"),
+            ("date", "six months ago"),
+            ("message", ""),
+        ] {
+            let mut invalid = document.clone();
+            invalid[key] = value.into();
+            let request =
+                serde_json::from_value::<Request>(invalid).expect("invalid request should parse");
+            assert!(
+                request.prepare(true).is_err(),
+                "{key} should reject {value}"
+            );
+        }
+        let mut confirmed = document;
+        confirmed["yes"] = true.into();
+        let request =
+            serde_json::from_value::<Request>(confirmed).expect("confirmed request should parse");
+        assert!(request.prepare(false).is_ok());
     }
 
     #[test]

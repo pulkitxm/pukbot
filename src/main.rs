@@ -3,6 +3,7 @@ mod completion;
 mod crew;
 mod doctor;
 mod error;
+mod history_root;
 mod local;
 mod manual;
 mod media;
@@ -331,6 +332,8 @@ enum RepositoryCommand {
     Dispatch(RepositoryDispatchArgs),
     #[command(about = "Sync a fork branch with its upstream repository through the Pukbot App")]
     SyncFork(RepositorySyncForkArgs),
+    #[command(about = "Prepend a dated empty root and atomically preserve the original branch")]
+    PrependRoot(RepositoryPrependRootArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -570,6 +573,26 @@ struct RepositorySyncForkArgs {
     repo: Repository,
     #[arg(long, value_name = "BRANCH")]
     branch: String,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct RepositoryPrependRootArgs {
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long)]
+    branch: String,
+    #[arg(long)]
+    backup_branch: String,
+    #[arg(long, value_name = "SHA")]
+    expected_head: String,
+    #[arg(long, value_name = "RFC3339")]
+    date: String,
+    #[command(flatten)]
+    message: MessageArgs,
+    #[arg(long)]
+    yes: bool,
     #[arg(long)]
     dry_run: bool,
 }
@@ -1975,6 +1998,19 @@ fn run_repository(command: RepositoryCommand, json: bool) -> Result<()> {
             args.dry_run,
             json,
         ),
+        RepositoryCommand::PrependRoot(args) => execute(
+            Request::RepositoryPrependRoot {
+                repository: args.repo,
+                branch: args.branch,
+                backup_branch: args.backup_branch,
+                expected_head: args.expected_head,
+                date: args.date,
+                message: read_message(&args.message)?,
+                yes: args.yes,
+            },
+            args.dry_run,
+            json,
+        ),
     }
 }
 
@@ -2543,6 +2579,10 @@ fn capabilities() -> Capabilities {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the ordered capability inventory stays in one place"
+)]
 fn capability_commands() -> Vec<String> {
     [
         "apply",
@@ -2617,6 +2657,7 @@ fn capability_commands() -> Vec<String> {
         "wiki.publish",
         "repository.dispatch",
         "repository.sync-fork",
+        "repository.prepend-root",
         "ref.create",
         "ref.delete",
         "tag.create",
@@ -2691,6 +2732,7 @@ fn attribution_capabilities() -> Attribution {
             "stack-api.unstack",
             "stack-api.merge",
             "commit.create",
+            "repository.prepend-root",
         ],
         app: vec![
             "comment.create",

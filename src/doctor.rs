@@ -203,6 +203,7 @@ const WORKFLOW_COMMANDS: &[&str] = &[
 const DEPLOYMENT_COMMANDS: &[&str] = &["deployment.create", "deployment.status"];
 
 const LOCAL_COMMANDS: &[&str] = &[
+    "repository.prepend-root",
     "pr.create",
     "pr.edit",
     "pr.close",

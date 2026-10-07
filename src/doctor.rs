@@ -74,16 +74,18 @@ fn evaluate(permissions: &BTreeMap<String, String>) -> Vec<OperationAvailability
     let mut operations = Vec::new();
     for command in APP_DEFAULT_COMMANDS {
         let sync_fork = *command == "repository.sync-fork";
-        let available = default && (!sync_fork || has_write(permissions, "workflows"));
+        let available = if sync_fork {
+            has_write(permissions, "contents")
+        } else {
+            default
+        };
         operations.push(OperationAvailability {
             command: (*command).to_owned(),
             available,
             required_permission: if available {
                 None
             } else if sync_fork {
-                Some(
-                    "contents:write, issues:write, pull_requests:write, workflows:write".to_owned(),
-                )
+                Some("contents:write".to_owned())
             } else {
                 Some("contents:write, issues:write, pull_requests:write".to_owned())
             },
@@ -300,13 +302,9 @@ mod tests {
     }
 
     #[test]
-    fn requires_workflows_write_for_fork_sync() {
-        let mut permissions = BTreeMap::from([
-            ("contents".to_owned(), "write".to_owned()),
-            ("issues".to_owned(), "write".to_owned()),
-            ("pull_requests".to_owned(), "write".to_owned()),
-        ]);
-        for available in [false, true] {
+    fn requires_only_contents_write_for_fork_sync() {
+        let mut permissions = BTreeMap::from([("contents".to_owned(), "write".to_owned())]);
+        for available in [true, false] {
             let operations = evaluate(&permissions);
             let sync = operations
                 .iter()
@@ -314,7 +312,7 @@ mod tests {
                 .expect("fork sync should be present");
             assert_eq!(sync.available, available);
             assert_eq!(sync.required_permission.is_none(), available);
-            permissions.insert("workflows".to_owned(), "write".to_owned());
+            permissions.remove("contents");
         }
     }
 }

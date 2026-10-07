@@ -637,8 +637,7 @@ The typed JSON operation is `repository_sync_fork`:
 }
 ```
 
-The App installation must include the fork and grant Workflows write access
-because upstream changes can include workflow files.
+The App installation must include the fork and grant Contents write access.
 
 ## Git refs and tags
 

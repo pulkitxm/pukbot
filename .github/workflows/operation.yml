@@ -41,15 +41,12 @@ jobs:
           owner: ${{ fromJSON(inputs.payload).owner }}
           repositories: ${{ fromJSON(inputs.payload).repository }}
           permission-contents: write
-          permission-issues: write
-          permission-pull-requests: write
+          permission-issues: ${{ fromJSON(inputs.payload).operation != 'repository_sync_fork' && 'write' || '' }}
+          permission-pull-requests: ${{ fromJSON(inputs.payload).operation != 'repository_sync_fork' && 'write' || '' }}
           permission-workflows: >-
             ${{
-              (
-                fromJSON(inputs.payload).operation == 'repository_sync_fork' ||
-                fromJSON(inputs.payload).operation == 'commit_create' &&
-                contains(toJSON(fromJSON(inputs.payload).files.*.path), '".github/workflows/')
-              ) &&
+              fromJSON(inputs.payload).operation == 'commit_create' &&
+              contains(toJSON(fromJSON(inputs.payload).files.*.path), '".github/workflows/') &&
               'write' || ''
             }}
       - id: deployment-token

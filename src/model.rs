@@ -743,7 +743,7 @@ impl Request {
             } => {
                 validate_title(&title)?;
                 validate_optional_body(body.as_deref())?;
-                validate_branch(&head)?;
+                validate_pull_request_head(&head)?;
                 validate_branch(&base)?;
                 validate_values(&labels, "label")?;
                 validate_values(&assignees, "assignee")?;
@@ -1998,6 +1998,17 @@ fn unclosed_code_fence(body: &str) -> Option<String> {
     open.map(|(marker, width)| marker.to_string().repeat(width))
 }
 
+fn validate_pull_request_head(head: &str) -> Result<()> {
+    if let Some((owner, branch)) = head.split_once(':') {
+        if owner.is_empty() || !owner.chars().all(is_repository_character) {
+            bail!("pull request head owner contains unsupported characters");
+        }
+        validate_branch(branch)
+    } else {
+        validate_branch(head)
+    }
+}
+
 fn validate_branch(branch: &str) -> Result<()> {
     let invalid_component = branch.split('/').any(|component| {
         component.is_empty()
@@ -2611,6 +2622,53 @@ mod tests {
             "repository": "owner/repo",
             "pull_requests": (1..=101).collect::<Vec<_>>()
         }))
+        .expect("request should parse");
+        assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn accepts_cross_repository_pull_request_heads_without_changing_them() {
+        for head in ["feature/release", "fork-owner:feature/release"] {
+            let request = serde_json::from_value::<Request>(serde_json::json!({
+                "operation": "pull_request_create",
+                "repository": "upstream/project",
+                "title": "Release 1.2.3",
+                "head": head,
+                "base": "main"
+            }))
+            .expect("request should parse");
+            let payload =
+                serde_json::to_value(request.prepare(true).expect("head should be valid"))
+                    .expect("operation should serialize");
+            assert_eq!(payload["head"], head);
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_pull_request_head_owners_and_refs() {
+        for head in [
+            ":feature",
+            "fork:",
+            "fork/name:feature",
+            "fork name:feature",
+            "fork:feature:extra",
+            "fork:feature..release",
+            "fork:feature/.hidden",
+            "fork:feature.lock",
+        ] {
+            let request = serde_json::from_value::<Request>(serde_json::json!({
+                "operation": "pull_request_create",
+                "repository": "upstream/project",
+                "title": "Release 1.2.3",
+                "head": head,
+                "base": "main"
+            }))
+            .expect("request should parse");
+            assert!(request.prepare(true).is_err(), "{head}");
+        }
+        let request = serde_json::from_str::<Request>(
+            r#"{"operation":"pull_request_create","repository":"upstream/project","title":"Release","head":"fork:feature","base":"upstream:main"}"#,
+        )
         .expect("request should parse");
         assert!(request.prepare(true).is_err());
     }

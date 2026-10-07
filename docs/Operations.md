@@ -216,6 +216,9 @@ JSON operation names are:
 - `pull_request_disable_auto_merge`
 
 Create accepts `title`, optional `body`, `head`, `base`, and optional `draft`.
+For a pull request from a fork, `head` accepts `OWNER:BRANCH`, such as
+`fork-owner:release/1.2.3`. The owner prefix is preserved in the GitHub request,
+and `base` remains an ordinary branch in the target repository.
 Edit accepts `number` and at least one of `title`, `body`, or `base`. Review
 events are `approve`, `request_changes`, and `comment`. Requesting changes
 requires a body.

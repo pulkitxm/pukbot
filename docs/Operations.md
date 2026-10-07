@@ -566,7 +566,7 @@ Results report who GitHub records as the actor:
 `commit create`, which execute locally under the authenticated GitHub CLI
 session. It is `pukbot` for pull request create, edit, merge, review, and
 update-branch with `--as-app`, for `commit create` with `--as-app`, and for every
-`comment`, `issue`, repository dispatch, and workflow mutation. App operations
+`comment`, `issue`, repository, and workflow mutation. App operations
 execute inside the protected workflow under a short-lived App installation
 token and carry a `workflowUrl`.
 
@@ -614,6 +614,31 @@ symlinks, unsafe paths, empty changes, incomplete source pairs, and replacing
 while also listing deleted paths. The JSON operation is `wiki_publish` with
 `message`, optional paired `source_ref` and `source_path`, `delete`, and
 `replace`.
+
+## Fork synchronization
+
+```bash
+pukbot repository sync-fork --repo owner/fork --branch main --json
+pukbot repository sync-fork --repo owner/fork --branch main --dry-run --json
+```
+
+Fork synchronization runs through the protected workflow as the Pukbot App.
+GitHub resolves the upstream from the fork's repository relationship and syncs
+the selected branch. An already-current branch succeeds, and merge conflicts
+fail the operation. The result returns the fork branch URL.
+
+The typed JSON operation is `repository_sync_fork`:
+
+```json
+{
+  "operation": "repository_sync_fork",
+  "repository": "owner/fork",
+  "branch": "main"
+}
+```
+
+The App installation must include the fork and grant Workflows write access
+because upstream changes can include workflow files.
 
 ## Git refs and tags
 

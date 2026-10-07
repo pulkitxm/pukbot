@@ -173,6 +173,7 @@ const APP_DEFAULT_COMMANDS: &[&str] = &[
     "commit.create",
     "wiki.publish",
     "repository.dispatch",
+    "repository.sync-fork",
     "ref.create",
     "ref.delete",
     "tag.create",

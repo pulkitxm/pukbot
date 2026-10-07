@@ -466,6 +466,10 @@ pub enum Request {
         #[serde(default)]
         client_payload: BTreeMap<String, serde_json::Value>,
     },
+    RepositorySyncFork {
+        repository: Repository,
+        branch: String,
+    },
     RefCreate {
         repository: Repository,
         #[serde(rename = "ref")]
@@ -1041,6 +1045,14 @@ impl Request {
                     client_payload,
                 })
             }
+            Self::RepositorySyncFork { repository, branch } => {
+                validate_branch(&branch)?;
+                Ok(Operation::RepositorySyncFork {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    branch,
+                })
+            }
             Self::RefCreate {
                 repository,
                 reference,
@@ -1542,6 +1554,11 @@ pub enum Operation {
         event_type: String,
         client_payload: BTreeMap<String, serde_json::Value>,
     },
+    RepositorySyncFork {
+        owner: String,
+        repository: String,
+        branch: String,
+    },
     RefCreate {
         owner: String,
         repository: String,
@@ -1695,6 +1712,7 @@ impl Operation {
             Self::CommitCreate { .. } => "commit_create",
             Self::WikiPublish { .. } => "wiki_publish",
             Self::RepositoryDispatch { .. } => "repository_dispatch",
+            Self::RepositorySyncFork { .. } => "repository_sync_fork",
             Self::RefCreate { .. } => "ref_create",
             Self::RefDelete { .. } => "ref_delete",
             Self::TagCreate { .. } => "tag_create",
@@ -2582,6 +2600,7 @@ mod tests {
             r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"data: update roster","files":[{"path":"data/members.json","content":"[]"},{"path":"data/old.json","delete":true}]}"#,
             r#"{"operation":"wiki_publish","repository":"owner/repo","message":"docs: publish wiki","source_ref":"main","source_path":"wiki","delete":["Old.md"],"replace":false}"#,
             r#"{"operation":"repository_dispatch","repository":"owner/repo","event_type":"apt-release","client_payload":{"version":"1.2.3"}}"#,
+            r#"{"operation":"repository_sync_fork","repository":"owner/fork","branch":"main"}"#,
             r#"{"operation":"ref_create","repository":"owner/repo","ref":"refs/heads/release","sha":"0123456789abcdef0123456789abcdef01234567"}"#,
             r#"{"operation":"ref_delete","repository":"owner/repo","ref":"refs/heads/release"}"#,
             r#"{"operation":"tag_create","repository":"owner/repo","tag":"v1.2.3","target":"0123456789abcdef0123456789abcdef01234567","message":"release 1.2.3"}"#,

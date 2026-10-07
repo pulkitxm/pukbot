@@ -329,6 +329,8 @@ enum WikiCommand {
 #[derive(Debug, Subcommand)]
 enum RepositoryCommand {
     Dispatch(RepositoryDispatchArgs),
+    #[command(about = "Sync a fork branch with its upstream repository through the Pukbot App")]
+    SyncFork(RepositorySyncForkArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -558,6 +560,16 @@ struct RepositoryDispatchArgs {
     client_payload: Option<String>,
     #[arg(long, value_name = "FILE", conflicts_with = "client_payload")]
     client_payload_file: Option<PathBuf>,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+struct RepositorySyncForkArgs {
+    #[arg(long, value_name = "OWNER/REPOSITORY")]
+    repo: Repository,
+    #[arg(long, value_name = "BRANCH")]
+    branch: String,
     #[arg(long)]
     dry_run: bool,
 }
@@ -1955,6 +1967,14 @@ fn run_repository(command: RepositoryCommand, json: bool) -> Result<()> {
             args.dry_run,
             json,
         ),
+        RepositoryCommand::SyncFork(args) => execute(
+            Request::RepositorySyncFork {
+                repository: args.repo,
+                branch: args.branch,
+            },
+            args.dry_run,
+            json,
+        ),
     }
 }
 
@@ -2596,6 +2616,7 @@ fn capability_commands() -> Vec<String> {
         "crew.forget",
         "wiki.publish",
         "repository.dispatch",
+        "repository.sync-fork",
         "ref.create",
         "ref.delete",
         "tag.create",
@@ -2693,6 +2714,7 @@ fn attribution_capabilities() -> Attribution {
             "commit.create",
             "wiki.publish",
             "repository.dispatch",
+            "repository.sync-fork",
             "ref.create",
             "ref.delete",
             "tag.create",

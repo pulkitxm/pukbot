@@ -11,11 +11,13 @@ Bug reports, design feedback, documentation, tests, and code are welcome.
 
 ## Development Setup
 
-Pukbot requires Rust 1.85 or newer and GitHub CLI.
+Pukbot requires Rust 1.85 or newer and GitHub CLI. History rewrite tests also
+require Git and `git-filter-repo` on `PATH`.
 
 ```bash
 git clone https://github.com/pulkitxm/pukbot.git
 cd Pukbot
+python -m pip install git-filter-repo
 cargo test --locked
 ```
 

@@ -444,6 +444,57 @@ reports this as `localSync`. When the branch is left untouched, reconcile it
 with `git fetch` and `git rebase`, never `git reset --hard`, because a failed or
 partial commit leaves your edits only in the working tree.
 
+## Repository history
+
+```bash
+pukbot repository prepend-root --repo owner/repository --branch main \
+  --backup-branch backup/original \
+  --expected-head 0123456789abcdef0123456789abcdef01234567 \
+  --date 2025-01-01T00:00:00Z \
+  --message "chore: prepend retrospective history anchor" --dry-run --json
+```
+
+Replace `--dry-run` with `--yes` to execute. The typed JSON request is:
+
+```json
+{
+  "operation": "repository_prepend_root",
+  "repository": "owner/repository",
+  "branch": "main",
+  "backup_branch": "backup/original",
+  "expected_head": "0123456789abcdef0123456789abcdef01234567",
+  "date": "2025-01-01T00:00:00Z",
+  "message": "chore: prepend retrospective history anchor",
+  "yes": true
+}
+```
+
+The command requires Git and `git-filter-repo` on `PATH`, plus an authenticated
+GitHub CLI session with permission to force-update the target branch. Install
+the filter with `brew install git-filter-repo` or
+`python -m pip install git-filter-repo`. The root's author and committer come
+from the authenticated GitHub user. Configured commit trailers are applied to
+the new root.
+
+Pukbot clones into a temporary bare repository and requires exactly one
+existing root. The RFC 3339 date is normalized to UTC and must precede that
+root's author date. Each existing commit is rewritten onto the new empty root,
+with its tree, message bytes, author, committer, timestamps, and merge topology
+verified against the original. Existing empty commits are retained. Every
+rewritten commit receives a new ID and its old cryptographic signature is
+removed. The backup retains the original signed commits.
+
+The backup branch must be new and distinct from the target. Both refs publish
+in one atomic Git push through the user's `gh` credentials. Exact leases reject
+a moved target branch or a newly created backup, and a server rejection leaves
+both remote refs as they were. Branch protections still apply. Other branches
+and release tags continue referencing their original commits.
+
+Successful output reports `authoredBy` as `user`, a null `workflowUrl`, and the
+rewritten tip's commit URL in `resourceUrl`. The local checkout is independent
+of the temporary clone. Fetch the rewritten branch and create a fresh worktree
+for subsequent work.
+
 ## Repository dispatches
 
 ```bash

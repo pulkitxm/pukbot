@@ -8,7 +8,7 @@
 Pukbot is an agent-first Rust CLI for typed GitHub operations through the
 Pukbot GitHub App!
 
-Comment, issue, commit, repository dispatch, and workflow operations run
+Comment, issue, commit, repository, and workflow operations run
 through the App! The CLI never receives the GitHub App private key or an
 installation token. A protected GitHub Actions environment mints a short-lived,
 repository-scoped token, performs the operation, and discards the token.
@@ -234,6 +234,15 @@ binary files, and `.github/workflows` edits. When the checkout is on the target
 branch and its HEAD is the new commit's parent, Pukbot moves the local branch
 to the new commit with `git reset --soft`, so the index and working tree are
 never touched.
+
+Sync a fork with its upstream repository through the App, then open a pull
+request with an owner-qualified head:
+
+```bash
+pukbot repository sync-fork --repo owner/fork --branch main --json
+pukbot pr create --repo upstream/project --title "Update package" \
+  --head owner:release/update --base main --body "Updates the package."
+```
 
 Create and delete Git refs, lightweight tags, and annotated tags through the
 App:

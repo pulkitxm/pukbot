@@ -45,8 +45,11 @@ jobs:
           permission-pull-requests: write
           permission-workflows: >-
             ${{
-              fromJSON(inputs.payload).operation == 'commit_create' &&
-              contains(toJSON(fromJSON(inputs.payload).files.*.path), '".github/workflows/') &&
+              (
+                fromJSON(inputs.payload).operation == 'repository_sync_fork' ||
+                fromJSON(inputs.payload).operation == 'commit_create' &&
+                contains(toJSON(fromJSON(inputs.payload).files.*.path), '".github/workflows/')
+              ) &&
               'write' || ''
             }}
       - id: deployment-token
@@ -541,6 +544,13 @@ jobs:
               jq '{event_type, client_payload}' payload.json >request.json
               gh api --method POST "repos/${slug}/dispatches" --input request.json >/dev/null
               result="https://github.com/${slug}/actions"
+              ;;
+            repository_sync_fork)
+              branch=$(jq -er '.branch | select(length > 0 and length <= 255)' payload.json)
+              jq -n --arg branch "${branch}" '{branch: $branch}' >request.json
+              gh api --method POST "repos/${slug}/merge-upstream" --input request.json >/dev/null
+              encoded_branch=$(jq -rn --arg value "${branch}" '$value | @uri')
+              result="https://github.com/${slug}/tree/${encoded_branch}"
               ;;
             ref_create)
               reference=$(jq -er '.ref | select(startswith("refs/") and length <= 260)' payload.json)

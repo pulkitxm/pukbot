@@ -466,6 +466,10 @@ pub enum Request {
         #[serde(default)]
         client_payload: BTreeMap<String, serde_json::Value>,
     },
+    RepositorySyncFork {
+        repository: Repository,
+        branch: String,
+    },
     RefCreate {
         repository: Repository,
         #[serde(rename = "ref")]
@@ -743,7 +747,7 @@ impl Request {
             } => {
                 validate_title(&title)?;
                 validate_optional_body(body.as_deref())?;
-                validate_branch(&head)?;
+                validate_pull_request_head(&head)?;
                 validate_branch(&base)?;
                 validate_values(&labels, "label")?;
                 validate_values(&assignees, "assignee")?;
@@ -1039,6 +1043,14 @@ impl Request {
                     repository: repository.name,
                     event_type,
                     client_payload,
+                })
+            }
+            Self::RepositorySyncFork { repository, branch } => {
+                validate_branch(&branch)?;
+                Ok(Operation::RepositorySyncFork {
+                    owner: repository.owner,
+                    repository: repository.name,
+                    branch,
                 })
             }
             Self::RefCreate {
@@ -1542,6 +1554,11 @@ pub enum Operation {
         event_type: String,
         client_payload: BTreeMap<String, serde_json::Value>,
     },
+    RepositorySyncFork {
+        owner: String,
+        repository: String,
+        branch: String,
+    },
     RefCreate {
         owner: String,
         repository: String,
@@ -1695,6 +1712,7 @@ impl Operation {
             Self::CommitCreate { .. } => "commit_create",
             Self::WikiPublish { .. } => "wiki_publish",
             Self::RepositoryDispatch { .. } => "repository_dispatch",
+            Self::RepositorySyncFork { .. } => "repository_sync_fork",
             Self::RefCreate { .. } => "ref_create",
             Self::RefDelete { .. } => "ref_delete",
             Self::TagCreate { .. } => "tag_create",
@@ -1996,6 +2014,17 @@ fn unclosed_code_fence(body: &str) -> Option<String> {
         }
     }
     open.map(|(marker, width)| marker.to_string().repeat(width))
+}
+
+fn validate_pull_request_head(head: &str) -> Result<()> {
+    if let Some((owner, branch)) = head.split_once(':') {
+        if owner.is_empty() || !owner.chars().all(is_repository_character) {
+            bail!("pull request head owner contains unsupported characters");
+        }
+        validate_branch(branch)
+    } else {
+        validate_branch(head)
+    }
 }
 
 fn validate_branch(branch: &str) -> Result<()> {
@@ -2571,6 +2600,7 @@ mod tests {
             r#"{"operation":"commit_create","repository":"owner/repo","branch":"main","message":"data: update roster","files":[{"path":"data/members.json","content":"[]"},{"path":"data/old.json","delete":true}]}"#,
             r#"{"operation":"wiki_publish","repository":"owner/repo","message":"docs: publish wiki","source_ref":"main","source_path":"wiki","delete":["Old.md"],"replace":false}"#,
             r#"{"operation":"repository_dispatch","repository":"owner/repo","event_type":"apt-release","client_payload":{"version":"1.2.3"}}"#,
+            r#"{"operation":"repository_sync_fork","repository":"owner/fork","branch":"main"}"#,
             r#"{"operation":"ref_create","repository":"owner/repo","ref":"refs/heads/release","sha":"0123456789abcdef0123456789abcdef01234567"}"#,
             r#"{"operation":"ref_delete","repository":"owner/repo","ref":"refs/heads/release"}"#,
             r#"{"operation":"tag_create","repository":"owner/repo","tag":"v1.2.3","target":"0123456789abcdef0123456789abcdef01234567","message":"release 1.2.3"}"#,
@@ -2611,6 +2641,53 @@ mod tests {
             "repository": "owner/repo",
             "pull_requests": (1..=101).collect::<Vec<_>>()
         }))
+        .expect("request should parse");
+        assert!(request.prepare(true).is_err());
+    }
+
+    #[test]
+    fn accepts_cross_repository_pull_request_heads_without_changing_them() {
+        for head in ["feature/release", "fork-owner:feature/release"] {
+            let request = serde_json::from_value::<Request>(serde_json::json!({
+                "operation": "pull_request_create",
+                "repository": "upstream/project",
+                "title": "Release 1.2.3",
+                "head": head,
+                "base": "main"
+            }))
+            .expect("request should parse");
+            let payload =
+                serde_json::to_value(request.prepare(true).expect("head should be valid"))
+                    .expect("operation should serialize");
+            assert_eq!(payload["head"], head);
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_pull_request_head_owners_and_refs() {
+        for head in [
+            ":feature",
+            "fork:",
+            "fork/name:feature",
+            "fork name:feature",
+            "fork:feature:extra",
+            "fork:feature..release",
+            "fork:feature/.hidden",
+            "fork:feature.lock",
+        ] {
+            let request = serde_json::from_value::<Request>(serde_json::json!({
+                "operation": "pull_request_create",
+                "repository": "upstream/project",
+                "title": "Release 1.2.3",
+                "head": head,
+                "base": "main"
+            }))
+            .expect("request should parse");
+            assert!(request.prepare(true).is_err(), "{head}");
+        }
+        let request = serde_json::from_str::<Request>(
+            r#"{"operation":"pull_request_create","repository":"upstream/project","title":"Release","head":"fork:feature","base":"upstream:main"}"#,
+        )
         .expect("request should parse");
         assert!(request.prepare(true).is_err());
     }

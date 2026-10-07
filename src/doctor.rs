@@ -73,15 +73,21 @@ fn evaluate(permissions: &BTreeMap<String, String>) -> Vec<OperationAvailability
     let deployment = has_write(permissions, "deployments");
     let mut operations = Vec::new();
     for command in APP_DEFAULT_COMMANDS {
+        let sync_fork = *command == "repository.sync-fork";
+        let available = default && (!sync_fork || has_write(permissions, "workflows"));
         operations.push(OperationAvailability {
             command: (*command).to_owned(),
-            available: default,
-            required_permission: if default {
+            available,
+            required_permission: if available {
                 None
+            } else if sync_fork {
+                Some(
+                    "contents:write, issues:write, pull_requests:write, workflows:write".to_owned(),
+                )
             } else {
                 Some("contents:write, issues:write, pull_requests:write".to_owned())
             },
-            reason: if default {
+            reason: if available {
                 None
             } else {
                 Some("installation is missing one or more default write permissions".to_owned())
@@ -173,6 +179,7 @@ const APP_DEFAULT_COMMANDS: &[&str] = &[
     "commit.create",
     "wiki.publish",
     "repository.dispatch",
+    "repository.sync-fork",
     "ref.create",
     "ref.delete",
     "tag.create",
@@ -290,5 +297,24 @@ mod tests {
     fn accepts_admin_as_write() {
         let permissions = BTreeMap::from([("actions".to_owned(), "admin".to_owned())]);
         assert!(has_write(&permissions, "actions"));
+    }
+
+    #[test]
+    fn requires_workflows_write_for_fork_sync() {
+        let mut permissions = BTreeMap::from([
+            ("contents".to_owned(), "write".to_owned()),
+            ("issues".to_owned(), "write".to_owned()),
+            ("pull_requests".to_owned(), "write".to_owned()),
+        ]);
+        for available in [false, true] {
+            let operations = evaluate(&permissions);
+            let sync = operations
+                .iter()
+                .find(|operation| operation.command == "repository.sync-fork")
+                .expect("fork sync should be present");
+            assert_eq!(sync.available, available);
+            assert_eq!(sync.required_permission.is_none(), available);
+            permissions.insert("workflows".to_owned(), "write".to_owned());
+        }
     }
 }

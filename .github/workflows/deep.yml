@@ -68,6 +68,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           key: sanitizer-${{ matrix.sanitizer }}
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install git-filter-repo==2.47.0
       - name: Run tests under the sanitizer
         env:
           RUSTFLAGS: -Zsanitizer=${{ matrix.sanitizer }}
@@ -91,6 +95,10 @@ jobs:
       - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc
         with:
           tool: cargo-careful
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install git-filter-repo==2.47.0
       - run: cargo +nightly careful test
 
   mutants:
@@ -111,6 +119,10 @@ jobs:
         with:
           tool: cargo-mutants
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install git-filter-repo==2.47.0
       - name: Hunt surviving mutations
         continue-on-error: true
         env:

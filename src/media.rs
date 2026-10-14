@@ -1,12 +1,14 @@
 use std::cell::OnceCell;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use anyhow::{Context, Result, bail};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+
+use crate::gh;
 
 const WORKFLOW_REPOSITORY: &str = "pulkitxm/pukbot";
 const ASSET_RELEASE: &str = "comment-assets";
@@ -72,7 +74,7 @@ impl UploadTarget {
         if let Some(id) = self.repository_id.get() {
             return Ok(*id);
         }
-        let output = Command::new("gh")
+        let output = gh::command()
             .args(["api", &format!("repos/{}", self.slug), "--jq", ".id"])
             .output()
             .context("failed to launch gh; install and authenticate GitHub CLI")?;
@@ -244,7 +246,7 @@ fn upload_attachment(
         target.repository_id()?
     );
     let content_length = format!("Content-Length: {size}");
-    let output = Command::new("gh")
+    let output = gh::command()
         .args(["api", &endpoint, "--method", "POST", "--input"])
         .arg(path)
         .args([
@@ -299,7 +301,7 @@ fn upload_release_asset(path: &Path, extension: &str, size: u64, dry_run: bool) 
     let directory = tempfile::tempdir().context("failed to prepare local media upload")?;
     let staged_path = directory.path().join(&asset_name);
     fs::copy(path, &staged_path).context("failed to stage local media upload")?;
-    let status = Command::new("gh")
+    let status = gh::command()
         .args(["release", "upload", ASSET_RELEASE])
         .arg(&staged_path)
         .args(["--repo", WORKFLOW_REPOSITORY, "--clobber"])
@@ -349,7 +351,7 @@ fn ensure_asset_release() -> Result<()> {
     if asset_release_exists()? {
         return Ok(());
     }
-    let status = Command::new("gh")
+    let status = gh::command()
         .args([
             "release",
             "create",
@@ -373,7 +375,7 @@ fn ensure_asset_release() -> Result<()> {
 }
 
 fn asset_release_exists() -> Result<bool> {
-    let status = Command::new("gh")
+    let status = gh::command()
         .args([
             "release",
             "view",

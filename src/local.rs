@@ -1,11 +1,11 @@
 use std::fmt::Write as _;
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
 use crate::model::{CommitFile, Operation, Reaction, ReviewEvent};
-use crate::{commit, history_root, stack};
+use crate::{commit, gh, history_root, stack};
 
 pub fn runs_locally(operation: &Operation) -> bool {
     match operation {
@@ -425,7 +425,7 @@ fn create_commit(slug: &str, branch: &str, message: &str, files: &[CommitFile]) 
 
 fn disable_auto_merge(owner: &str, repository: &str, number: u64) -> Result<String> {
     let slug = slug(owner, repository);
-    let output = Command::new("gh")
+    let output = gh::command()
         .args([
             "pr",
             "merge",
@@ -446,7 +446,7 @@ fn disable_auto_merge(owner: &str, repository: &str, number: u64) -> Result<Stri
 }
 
 fn enable_auto_merge(slug: &str, number: u64, commit_message: Option<&str>) -> Result<()> {
-    let mut command = Command::new("gh");
+    let mut command = gh::command();
     command.args([
         "pr",
         "merge",
@@ -490,7 +490,7 @@ fn pull_request_number_from_url(url: &str) -> Result<u64> {
 
 fn set_draft(owner: &str, repository: &str, number: u64, draft: bool) -> Result<String> {
     let slug = slug(owner, repository);
-    let mut command = Command::new("gh");
+    let mut command = gh::command();
     command.args(["pr", "ready", &number.to_string(), "--repo", &slug]);
     if draft {
         command.arg("--undo");
@@ -517,7 +517,7 @@ fn api_output(
     request: Option<&Value>,
     filter: Option<&str>,
 ) -> Result<Output> {
-    let mut command = Command::new("gh");
+    let mut command = gh::command();
     command.args(["api", "--method", method, path]);
     if request.is_some() {
         command.args(["--input", "-"]);

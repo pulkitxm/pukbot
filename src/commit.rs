@@ -6,8 +6,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use base64::Engine as _;
 use serde::Serialize;
 
-use crate::crew;
 use crate::model::{CommitFile, CommitFileDocument, ContentEncoding, FileMode, Repository};
+use crate::{crew, gh};
 
 pub fn create_initial(
     slug: &str,
@@ -90,6 +90,7 @@ fn initial_git(
     ] {
         command.env_remove(variable);
     }
+    gh::authorize(&mut command);
     let mut child = command
         .env("GIT_AUTHOR_NAME", name)
         .env("GIT_AUTHOR_EMAIL", email)

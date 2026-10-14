@@ -7,6 +7,8 @@ use std::process::{Command, Output, Stdio};
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, SecondsFormat, Utc};
 
+use crate::gh;
+
 const HISTORY_FORMAT: &str = "%H%x00%T%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%B";
 
 type History = BTreeMap<String, Vec<Vec<u8>>>;
@@ -295,6 +297,7 @@ fn git_command(repository: &Path, args: &[&str]) -> Command {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    gh::authorize(&mut command);
     command
 }
 

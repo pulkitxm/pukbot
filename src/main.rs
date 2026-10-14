@@ -3,6 +3,7 @@ mod completion;
 mod crew;
 mod doctor;
 mod error;
+mod gh;
 mod history_root;
 mod local;
 mod manual;

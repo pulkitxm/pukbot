@@ -1,12 +1,12 @@
 use std::io::{self, Write};
 use std::num::NonZeroU64;
-use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
+use crate::gh;
 use crate::model::Repository;
 
 const RUN_FIELDS: &str = "attempt,conclusion,createdAt,databaseId,displayTitle,event,headBranch,headSha,jobs,number,startedAt,status,updatedAt,url,workflowName";
@@ -85,7 +85,7 @@ pub enum WatchOutput {
 }
 
 pub fn inspect(repository: &Repository, run_id: NonZeroU64) -> Result<WorkflowRun> {
-    let output = Command::new("gh")
+    let output = gh::command()
         .args([
             "run",
             "view",
@@ -192,7 +192,7 @@ pub fn run_id_from_url(repository: &Repository, url: &str) -> Result<NonZeroU64>
 
 fn inspect_actors(repository: &Repository, run_id: NonZeroU64) -> Result<RunActors> {
     let endpoint = format!("repos/{}/actions/runs/{run_id}", repository.slug());
-    let output = Command::new("gh")
+    let output = gh::command()
         .args(["api", &endpoint])
         .output()
         .context("failed to launch gh; install and authenticate GitHub CLI")?;
@@ -203,7 +203,7 @@ fn inspect_actors(repository: &Repository, run_id: NonZeroU64) -> Result<RunActo
 }
 
 fn read_logs(repository: &Repository, run_id: NonZeroU64, failed_only: bool) -> Result<String> {
-    let mut command = Command::new("gh");
+    let mut command = gh::command();
     command.args([
         "run",
         "view",

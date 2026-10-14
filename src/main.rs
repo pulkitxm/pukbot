@@ -3,6 +3,7 @@ mod completion;
 mod crew;
 mod doctor;
 mod error;
+mod gh;
 mod history_root;
 mod local;
 mod manual;
@@ -24,7 +25,7 @@ use std::time::Duration;
 use std::{env, fs, process};
 
 use anyhow::{Context, Result, bail};
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgMatches, Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use clap_complete::Shell;
 use model::{
     CommentDocument, DeploymentState, LockReason, MAX_BODY_BYTES, Reaction, ReleaseLatest,
@@ -216,6 +217,8 @@ enum CrewCommand {
     Define(CrewDefineArgs),
     #[command(about = "Remove a custom crew member definition")]
     Forget(CrewForgetArgs),
+    #[command(about = "Show, set, or clear the gh session a repository runs under")]
+    Account(CrewAccountArgs),
 }
 
 #[derive(Debug, Args)]
@@ -240,6 +243,16 @@ struct CrewDefineArgs {
     name: String,
     #[arg(long)]
     email: String,
+}
+
+#[derive(Debug, Args)]
+struct CrewAccountArgs {
+    #[arg(value_name = "LOGIN")]
+    login: Option<String>,
+    #[arg(long, conflicts_with = "login")]
+    clear: bool,
+    #[command(flatten)]
+    target: CrewTargetArgs,
 }
 
 #[derive(Debug, Args)]
@@ -1198,9 +1211,13 @@ fn main() {
     if let Some(arguments) = raw_stack_arguments() {
         exit_with_stack_command(arguments);
     }
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
     let json = cli.json;
-    if let Err(error) = run(cli) {
+    if let Err(error) = target_repository(&matches)
+        .map_or(Ok(()), |repository| gh::select(&repository))
+        .and_then(|()| run(cli))
+    {
         if json {
             let body = error::classify(&error);
             drop(error::emit_json_error(&body));
@@ -1209,6 +1226,26 @@ fn main() {
         }
         process::exit(1);
     }
+}
+
+fn target_repository(matches: &ArgMatches) -> Option<Repository> {
+    let mut matches = matches;
+    while let Some((_, subcommand)) = matches.subcommand() {
+        matches = subcommand;
+    }
+    matches
+        .try_get_one::<Repository>("repo")
+        .ok()
+        .flatten()
+        .cloned()
+}
+
+fn operation_repository(operation: &model::Operation) -> Option<Repository> {
+    let value = serde_json::to_value(operation).ok()?;
+    Some(Repository {
+        owner: value.get("owner")?.as_str()?.to_owned(),
+        name: value.get("repository")?.as_str()?.to_owned(),
+    })
 }
 
 fn raw_stack_arguments() -> Option<Vec<OsString>> {
@@ -1241,13 +1278,21 @@ fn exit_with_stack_command(arguments: Vec<OsString>) -> ! {
             }
         }
     }
-    match stack::run_extension(arguments) {
+    let status = select_current_repository().and_then(|()| stack::run_extension(arguments));
+    match status {
         Ok(status) => process::exit(stack::extension_exit_code(status)),
         Err(error) => {
             drop(writeln!(io::stderr().lock(), "error: {error:#}"));
             process::exit(1);
         }
     }
+}
+
+fn select_current_repository() -> Result<()> {
+    if !crew::load()?.binds_accounts() {
+        return Ok(());
+    }
+    stack::current_repository().map_or(Ok(()), |repository| gh::select(&repository))
 }
 
 fn run_stack_compatibility_merge(arguments: impl IntoIterator<Item = OsString>) -> Result<()> {
@@ -1264,6 +1309,7 @@ fn run_stack_compatibility_merge(arguments: impl IntoIterator<Item = OsString>) 
         bail!("stack merge requires --yes");
     }
     let repository = stack::current_repository()?;
+    gh::select(&repository)?;
     let pull_request = stack::resolve_compatibility_merge_target(&repository, args.target)?;
     let commit_message = crew::merge_message(&repository)?;
     let resource_url = stack::merge_pull_request(
@@ -1928,6 +1974,28 @@ fn run_crew(command: CrewCommand, json: bool) -> Result<()> {
                 Ok(())
             }
         }
+        CrewCommand::Account(args) => {
+            let repository = crew_repository(&args.target)?;
+            let mut config = crew::Config::load(&path)?;
+            if args.clear {
+                config.unbind_account(&repository)?;
+                config.save(&path)?;
+            } else if let Some(login) = args.login {
+                gh::token_for(&login)?;
+                config.bind_account(&repository, &login)?;
+                config.save(&path)?;
+            }
+            let binding = config.account(&repository)?;
+            if json {
+                return emit_json(&binding);
+            }
+            writeln!(
+                io::stdout().lock(),
+                "{}",
+                binding.account.as_deref().unwrap_or("active gh account")
+            )?;
+            Ok(())
+        }
         CrewCommand::Forget(args) => {
             let mut config = crew::Config::load(&path)?;
             let removal = config.forget(&args.agent)?;
@@ -2344,6 +2412,9 @@ fn execute(request: Request, dry_run: bool, json: bool) -> Result<()> {
     if dry_run {
         return emit_json(&operation);
     }
+    if let Some(repository) = operation_repository(&operation) {
+        gh::select(&repository)?;
+    }
     let output = perform_operation(&operation, !json)?;
     if json {
         emit_json(&output)
@@ -2654,6 +2725,7 @@ fn capability_commands() -> Vec<String> {
         "crew.clear",
         "crew.define",
         "crew.forget",
+        "crew.account",
         "wiki.publish",
         "repository.dispatch",
         "repository.sync-fork",

@@ -1,10 +1,11 @@
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
+use crate::gh;
 use crate::model::Operation;
 
 const WORKFLOW_REPOSITORY: &str = "pulkitxm/pukbot";
@@ -42,7 +43,7 @@ pub fn dispatch(operation: &Operation, stream: bool) -> Result<WorkflowResult> {
         requester: &requester,
         request_id: &request_id,
     };
-    let mut dispatch = Command::new("gh");
+    let mut dispatch = gh::command();
     dispatch.args([
         "workflow",
         "run",
@@ -67,7 +68,7 @@ pub fn dispatch(operation: &Operation, stream: bool) -> Result<WorkflowResult> {
         bail!("GitHub rejected the Pukbot workflow dispatch");
     }
     let run = find_run(&request_id)?;
-    let mut watch = Command::new("gh");
+    let mut watch = gh::command();
     watch.args([
         "run",
         "watch",
@@ -94,7 +95,7 @@ pub fn dispatch(operation: &Operation, stream: bool) -> Result<WorkflowResult> {
 }
 
 fn github_login() -> Result<String> {
-    let output = Command::new("gh")
+    let output = gh::command()
         .args(["api", "user", "--jq", ".login"])
         .output()
         .context("failed to launch gh; install and authenticate GitHub CLI")?;
@@ -125,7 +126,7 @@ fn request_id() -> Result<String> {
 fn find_run(request_id: &str) -> Result<WorkflowRun> {
     let expected_title = format!("Pukbot operation {request_id}");
     for _ in 0..RUN_LOOKUP_ATTEMPTS {
-        let output = Command::new("gh")
+        let output = gh::command()
             .args([
                 "run",
                 "list",
@@ -159,7 +160,7 @@ fn find_run(request_id: &str) -> Result<WorkflowRun> {
 }
 
 fn inspect_run(run_id: u64) -> Result<WorkflowRun> {
-    let output = Command::new("gh")
+    let output = gh::command()
         .args([
             "run",
             "view",
@@ -179,7 +180,7 @@ fn inspect_run(run_id: u64) -> Result<WorkflowRun> {
 
 fn show_failed_logs(run_id: u64) {
     drop(
-        Command::new("gh")
+        gh::command()
             .args([
                 "run",
                 "view",
@@ -193,7 +194,7 @@ fn show_failed_logs(run_id: u64) {
 }
 
 fn find_result_url(run_id: u64) -> Result<Option<String>> {
-    let output = Command::new("gh")
+    let output = gh::command()
         .args([
             "run",
             "view",

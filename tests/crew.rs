@@ -35,6 +35,12 @@ const PULL_REQUEST_BEHAVIOR: &str = r#"case "$*" in
         ;;
     "pr merge 7 --repo owner/repo --auto --squash"*)
         ;;
+    "auth status --hostname github.com --json hosts")
+        printf '%s\n' '{"hosts":{"github.com":[{"login":"primary","state":"success","active":true},{"login":"second","state":"success","active":false},{"login":"stale","state":"error","active":false}]}}'
+        ;;
+    "auth token --hostname github.com --user second")
+        printf '%s\n' 'second-token'
+        ;;
     *) exit 91 ;;
 esac"#;
 
@@ -52,7 +58,7 @@ impl Harness {
         fs::create_dir(&executable_directory).expect("fake executable directory should be created");
         let executable = executable_directory.join("gh");
         let script = format!(
-            "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >>\"$PUKBOT_FAKE_GH_LOG\"\n{PULL_REQUEST_BEHAVIOR}\n"
+            "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" >>\"$PUKBOT_FAKE_GH_LOG\"\nprintf 'token=%s\\n' \"${{GH_TOKEN:-}}\" >>\"$PUKBOT_FAKE_GH_LOG\"\n{PULL_REQUEST_BEHAVIOR}\n"
         );
         fs::write(&executable, script).expect("fake gh should be written");
         let mut permissions = fs::metadata(&executable)
@@ -88,6 +94,8 @@ impl Harness {
             )
             .env("PUKBOT_FAKE_GH_LOG", &self.log)
             .env("PUKBOT_CONFIG", &self.config)
+            .env_remove("GH_TOKEN")
+            .env_remove("GITHUB_TOKEN")
             .output()
             .expect("pukbot should run")
     }
@@ -372,4 +380,113 @@ fn reports_an_invalid_manifest() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("unknown agent ghost"));
     assert_eq!(harness.log(), "");
+}
+
+#[test]
+fn runs_bound_repositories_under_their_gh_session() {
+    let harness = Harness::new();
+
+    let bind = harness.run(&[
+        "crew",
+        "account",
+        "second",
+        "--repo",
+        "https://github.com/owner/*",
+        "--json",
+    ]);
+    assert_success(&bind);
+    assert_eq!(
+        json_output(&bind),
+        serde_json::json!({"repository": "https://github.com/owner/*", "account": "second"})
+    );
+    let saved: Value = serde_json::from_str(
+        &fs::read_to_string(&harness.config).expect("manifest should be written"),
+    )
+    .expect("manifest should be JSON");
+    assert_eq!(
+        saved["accounts"],
+        serde_json::json!({"https://github.com/owner/*": "second"})
+    );
+
+    let show = harness.run(&["crew", "account", "--repo", "owner/repo"]);
+    assert_success(&show);
+    assert_eq!(String::from_utf8_lossy(&show.stdout), "second\n");
+
+    fs::remove_file(&harness.log).expect("log should be reset");
+    let merge = harness.run(&["pr", "merge", "7", "--repo", "owner/repo", "--yes"]);
+    assert_success(&merge);
+    let log = harness.log();
+    assert!(
+        log.contains(
+            "api --method PUT repos/owner/repo/pulls/7/merge --input -\ntoken=second-token\n"
+        ),
+        "{log}"
+    );
+    assert!(
+        log.contains("auth token --hostname github.com --user second\ntoken=\n"),
+        "{log}"
+    );
+    let lines = log.lines().collect::<Vec<_>>();
+    for pair in lines.windows(2) {
+        if pair[0].starts_with("api ") {
+            assert_eq!(pair[1], "token=second-token", "{log}");
+        }
+    }
+
+    let cleared = harness.run(&[
+        "crew",
+        "account",
+        "--clear",
+        "--repo",
+        "https://github.com/owner/*",
+        "--json",
+    ]);
+    assert_success(&cleared);
+    assert_eq!(json_output(&cleared)["account"], Value::Null);
+
+    fs::remove_file(&harness.log).expect("log should be reset");
+    assert_success(&harness.run(&["pr", "merge", "7", "--repo", "owner/repo", "--yes"]));
+    let log = harness.log();
+    assert!(!log.contains("second-token"), "{log}");
+    assert!(!log.contains("auth "), "{log}");
+}
+
+#[test]
+fn refuses_sessions_gh_does_not_hold() {
+    let harness = Harness::new();
+
+    for login in ["ghost", "stale"] {
+        let bind = harness.run(&["crew", "account", login, "--repo", "owner/repo"]);
+        assert!(!bind.status.success());
+        assert!(
+            String::from_utf8_lossy(&bind.stderr).contains("gh has no working session"),
+            "{}",
+            String::from_utf8_lossy(&bind.stderr)
+        );
+    }
+    assert!(!harness.config.exists());
+
+    fs::create_dir_all(
+        harness
+            .config
+            .parent()
+            .expect("manifest should have a parent"),
+    )
+    .expect("manifest directory should be created");
+    fs::write(
+        &harness.config,
+        r#"{"accounts": {"https://github.com/owner/repo": "ghost"}}"#,
+    )
+    .expect("manifest should be written");
+    fs::remove_file(&harness.log).expect("log should be reset");
+
+    let merge = harness.run(&["pr", "merge", "7", "--repo", "owner/repo", "--yes"]);
+    assert!(!merge.status.success());
+    assert!(
+        String::from_utf8_lossy(&merge.stderr).contains("owner/repo is configured to use ghost")
+    );
+    assert!(!harness.log().contains("repos/owner/repo"));
+
+    let invalid = harness.run(&["crew", "account", "not_a_login", "--repo", "owner/repo"]);
+    assert!(!invalid.status.success());
 }

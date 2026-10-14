@@ -34,7 +34,7 @@ struct InstallationResponse {
 
 pub fn run(repository: &Repository) -> Result<DoctorReport> {
     let slug = repository.slug();
-    let output = std::process::Command::new("gh")
+    let output = crate::gh::command()
         .args(["api", &format!("repos/{slug}/installation")])
         .output()
         .context("failed to launch gh; install and authenticate GitHub CLI")?;

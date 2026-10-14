@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use std::num::NonZeroU64;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt as _;
-use std::process::{Command, ExitStatus, Output, Stdio};
+use std::process::{ExitStatus, Output, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -11,12 +11,13 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::gh;
 use crate::model::{Operation, Repository};
 
 const MERGE_POLL_ATTEMPTS: usize = 600;
 
 pub fn run_extension(arguments: Vec<OsString>) -> Result<ExitStatus> {
-    let mut command = Command::new("gh");
+    let mut command = gh::command();
     command.arg("stack").args(arguments);
     #[cfg(unix)]
     {
@@ -143,7 +144,7 @@ pub fn merge_status(
 }
 
 pub fn current_repository() -> Result<Repository> {
-    let output = Command::new("gh")
+    let output = gh::command()
         .args([
             "repo",
             "view",
@@ -171,7 +172,7 @@ pub fn resolve_compatibility_merge_target(
         }
         return Ok(target);
     }
-    let output = Command::new("gh")
+    let output = gh::command()
         .args(["stack", "view", "--json"])
         .output()
         .context("failed to launch gh-stack; run `gh extension install github/gh-stack`")?;
@@ -391,7 +392,7 @@ fn list_parts(
         |number| format!("?pull_request={number}&per_page=100"),
     );
     let path = format!("repos/{owner}/{repository}/stacks{query}");
-    let output = Command::new("gh")
+    let output = gh::command()
         .args(["api", "--paginate", "--slurp", &path])
         .output()
         .context("failed to launch gh; install and authenticate GitHub CLI")?;
@@ -443,7 +444,7 @@ fn merge_request(method: &str, path: &str, request: Option<&Value>) -> Result<As
 }
 
 fn run_api(method: &str, path: &str, request: Option<&Value>) -> Result<Output> {
-    let mut command = Command::new("gh");
+    let mut command = gh::command();
     command.args(["api", "--method", method, path]);
     if request.is_some() {
         command.args(["--input", "-"]);

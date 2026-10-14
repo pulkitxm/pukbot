@@ -1,5 +1,4 @@
 use std::num::NonZeroU64;
-use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
@@ -7,6 +6,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::gh;
 use crate::model::Repository;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -70,7 +70,7 @@ pub struct ReviewThread {
 
 pub fn pull_request_view(repository: &Repository, number: NonZeroU64) -> Result<PullRequestView> {
     let slug = repository.slug();
-    let output = Command::new("gh")
+    let output = gh::command()
         .args([
             "pr",
             "view",
@@ -132,7 +132,7 @@ pub fn pull_request_checks(
     number: NonZeroU64,
 ) -> Result<PullRequestChecks> {
     let slug = repository.slug();
-    let output = Command::new("gh")
+    let output = gh::command()
         .args([
             "pr",
             "checks",
@@ -173,7 +173,7 @@ pub fn workflow_runs(
     limit: u64,
 ) -> Result<Vec<WorkflowRunSummary>> {
     let slug = repository.slug();
-    let mut command = Command::new("gh");
+    let mut command = gh::command();
     command.args([
         "run",
         "list",
@@ -304,7 +304,7 @@ pub fn reply_to_review_comment(
 ) -> Result<String> {
     let slug = repository.slug();
     let path = format!("repos/{slug}/pulls/comments/{comment_id}/replies");
-    let mut child = Command::new("gh")
+    let mut child = gh::command()
         .args(["api", "--method", "POST", &path, "--input", "-"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -339,7 +339,7 @@ fn unresolved_threads(repository: &Repository, number: NonZeroU64) -> Result<u64
 
 fn graphql(_slug: &str, query: &str, variables: &Value) -> Result<Value> {
     let request = json!({ "query": query, "variables": variables });
-    let mut child = Command::new("gh")
+    let mut child = gh::command()
         .args(["api", "graphql", "--input", "-"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

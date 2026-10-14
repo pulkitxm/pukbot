@@ -14,6 +14,7 @@ const TRAILER_KEY: &str = "Co-authored-by";
 const OWNER_WILDCARD: &str = "*";
 const MAX_AGENT_KEY_BYTES: usize = 64;
 const MAX_IDENTITY_BYTES: usize = 256;
+const MAX_LOGIN_BYTES: usize = 39;
 const GITHUB_PREFIXES: [&str; 6] = [
     "https://github.com/",
     "http://github.com/",
@@ -86,6 +87,8 @@ pub struct Config {
     agents: BTreeMap<String, Agent>,
     #[serde(default)]
     repositories: BTreeMap<String, Vec<String>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    accounts: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -101,6 +104,12 @@ pub struct Member {
 pub struct Assignment {
     pub repository: String,
     pub members: Vec<Member>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AccountBinding {
+    pub repository: String,
+    pub account: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -157,7 +166,7 @@ impl Config {
     }
 
     pub fn assignment(&self, repository: &Repository) -> Result<Assignment> {
-        let members = match self.assigned_key(repository)? {
+        let members = match matching_key(&self.repositories, repository)? {
             Some(key) => self.repositories[&key]
                 .iter()
                 .map(|agent| {
@@ -197,12 +206,31 @@ impl Config {
     }
 
     pub fn clear(&mut self, repository: &Repository) -> Result<bool> {
-        let mut removed = false;
-        while let Some(key) = self.exact_key(repository)? {
-            self.repositories.remove(&key);
-            removed = true;
-        }
-        Ok(removed)
+        remove_keys(&mut self.repositories, repository)
+    }
+
+    pub fn account(&self, repository: &Repository) -> Result<AccountBinding> {
+        Ok(AccountBinding {
+            repository: repository_url(repository),
+            account: matching_key(&self.accounts, repository)?
+                .map(|key| self.accounts[&key].clone()),
+        })
+    }
+
+    pub fn binds_accounts(&self) -> bool {
+        !self.accounts.is_empty()
+    }
+
+    pub fn bind_account(&mut self, repository: &Repository, login: &str) -> Result<()> {
+        validate_login(login)?;
+        remove_keys(&mut self.accounts, repository)?;
+        self.accounts
+            .insert(repository_url(repository), login.to_owned());
+        Ok(())
+    }
+
+    pub fn unbind_account(&mut self, repository: &Repository) -> Result<bool> {
+        remove_keys(&mut self.accounts, repository)
     }
 
     pub fn define(&mut self, key: &str, agent: Agent) -> Result<()> {
@@ -250,48 +278,81 @@ impl Config {
         })
     }
 
-    fn assigned_key(&self, repository: &Repository) -> Result<Option<String>> {
-        if let Some(key) = self.exact_key(repository)? {
-            return Ok(Some(key));
-        }
-        let owner = Repository {
-            owner: repository.owner.clone(),
-            name: OWNER_WILDCARD.to_owned(),
-        };
-        self.exact_key(&owner)
-    }
-
-    fn exact_key(&self, repository: &Repository) -> Result<Option<String>> {
-        for key in self.repositories.keys() {
-            if same_repository(&parse_repository(key)?, repository) {
-                return Ok(Some(key.clone()));
-            }
-        }
-        Ok(None)
-    }
-
     fn validate(&self) -> Result<()> {
         for (key, agent) in &self.agents {
             validate_agent(key, agent)?;
         }
-        let mut repositories: Vec<Repository> = Vec::new();
+        validate_keys(&self.repositories)?;
         for (key, agents) in &self.repositories {
-            let repository = parse_repository(key)?;
-            if repositories
-                .iter()
-                .any(|existing| same_repository(existing, &repository))
-            {
-                bail!("repository {repository} is listed more than once");
-            }
             for agent in agents {
                 if self.member(agent).is_none() {
                     bail!("repository {key} uses unknown agent {agent}");
                 }
             }
-            repositories.push(repository);
+        }
+        validate_keys(&self.accounts)?;
+        for login in self.accounts.values() {
+            validate_login(login)?;
         }
         Ok(())
     }
+}
+
+fn matching_key<V>(map: &BTreeMap<String, V>, repository: &Repository) -> Result<Option<String>> {
+    if let Some(key) = exact_key(map, repository)? {
+        return Ok(Some(key));
+    }
+    let owner = Repository {
+        owner: repository.owner.clone(),
+        name: OWNER_WILDCARD.to_owned(),
+    };
+    exact_key(map, &owner)
+}
+
+fn exact_key<V>(map: &BTreeMap<String, V>, repository: &Repository) -> Result<Option<String>> {
+    for key in map.keys() {
+        if same_repository(&parse_repository(key)?, repository) {
+            return Ok(Some(key.clone()));
+        }
+    }
+    Ok(None)
+}
+
+fn remove_keys<V>(map: &mut BTreeMap<String, V>, repository: &Repository) -> Result<bool> {
+    let mut removed = false;
+    while let Some(key) = exact_key(map, repository)? {
+        map.remove(&key);
+        removed = true;
+    }
+    Ok(removed)
+}
+
+fn validate_keys<V>(map: &BTreeMap<String, V>) -> Result<()> {
+    let mut repositories: Vec<Repository> = Vec::new();
+    for key in map.keys() {
+        let repository = parse_repository(key)?;
+        if repositories
+            .iter()
+            .any(|existing| same_repository(existing, &repository))
+        {
+            bail!("repository {repository} is listed more than once");
+        }
+        repositories.push(repository);
+    }
+    Ok(())
+}
+
+pub fn validate_login(login: &str) -> Result<()> {
+    if login.is_empty()
+        || login.len() > MAX_LOGIN_BYTES
+        || login.starts_with('-')
+        || !login
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-')
+    {
+        bail!("{login:?} is not a GitHub login");
+    }
+    Ok(())
 }
 
 pub fn config_path() -> Result<PathBuf> {

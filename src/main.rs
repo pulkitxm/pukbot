@@ -1,4 +1,5 @@
 mod commit;
+mod commit_hooks;
 mod completion;
 mod crew;
 mod doctor;
@@ -54,6 +55,10 @@ language. Every fence must be closed. Prefer --body-file for anything longer
 than one line, because a shell mangles backticks and newlines.";
 
 const COMMIT_CREATE_LONG_HELP: &str = "Commit the staged changes to a branch on GitHub.
+
+The checkout's installed pre-commit hook runs before staged files are read.
+A failing hook blocks the GitHub write. A configured pre-commit setup requires
+an installed executable hook. Dry runs do not execute hooks.
 
 Stage with git add first. Pukbot reads every staged path, or only the PATH
 arguments, from the index with its content and git mode, so executables,
@@ -1884,6 +1889,9 @@ fn execute_pull_request_target(args: TargetArgs, json: bool, action: &str) -> Re
 fn run_commit(command: CommitCommand, json: bool) -> Result<()> {
     match command {
         CommitCommand::Create(args) => {
+            if !args.dry_run {
+                commit_hooks::run()?;
+            }
             let files = commit::staged_files(&args.paths)?;
             let request = Request::CommitCreate {
                 repository: args.repo.clone(),
@@ -2407,6 +2415,9 @@ fn parse_workflow_inputs(values: &[String]) -> Result<BTreeMap<String, String>> 
 }
 
 fn execute(request: Request, dry_run: bool, json: bool) -> Result<()> {
+    if !dry_run && matches!(&request, Request::CommitCreate { .. }) {
+        commit_hooks::run()?;
+    }
     let mut operation = request.prepare(dry_run)?;
     crew::attach(&mut operation)?;
     if dry_run {

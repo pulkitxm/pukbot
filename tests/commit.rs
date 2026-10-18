@@ -104,6 +104,132 @@ fn git(directory: &Path, arguments: &[&str]) {
     assert!(status.success());
 }
 
+fn hooked_repository(harness: &Harness, script: Option<&str>) -> PathBuf {
+    let repository = harness.directory.path().join("hooked-repository");
+    fs::create_dir(&repository).expect("repository should exist");
+    git(&repository, &["init", "-q"]);
+    fs::write(repository.join("note.txt"), "before\n").expect("file should exist");
+    git(&repository, &["add", "note.txt"]);
+    if let Some(script) = script {
+        let hook = repository.join(".git/hooks/pre-commit");
+        fs::write(&hook, format!("#!/bin/sh\nset -eu\n{script}\n")).expect("hook should exist");
+        set_mode(&hook, 0o755);
+    }
+    repository
+}
+
+fn checkpoint_arguments() -> [&'static str; 9] {
+    [
+        "commit",
+        "create",
+        "--repo",
+        "owner/repo",
+        "--branch",
+        "feature/x",
+        "--message",
+        "save note",
+        "--json",
+    ]
+}
+
+#[test]
+fn failed_native_hook_stops_before_github_writes() {
+    let harness = Harness::new();
+    let repository = hooked_repository(&harness, Some("exit 7"));
+    let output = harness.run_in(&repository, &checkpoint_arguments());
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("pre-commit checks failed"));
+    assert!(!harness.log.exists());
+}
+
+#[test]
+fn configured_checks_cannot_be_skipped_by_removing_the_hook() {
+    let harness = Harness::new();
+    let repository = hooked_repository(&harness, None);
+    fs::write(repository.join(".pre-commit-config.yaml"), "repos: []\n")
+        .expect("hook configuration should exist");
+    let output = harness.run_in(&repository, &checkpoint_arguments());
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("hook is missing"));
+    assert!(!harness.log.exists());
+}
+
+#[test]
+fn non_executable_hooks_stop_before_github_writes() {
+    let harness = Harness::new();
+    let repository = hooked_repository(&harness, Some("exit 7"));
+    set_mode(&repository.join(".git/hooks/pre-commit"), 0o644);
+    let output = harness.run_in(&repository, &checkpoint_arguments());
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("hook is not executable"));
+    assert!(!harness.log.exists());
+}
+
+#[test]
+fn custom_hook_directories_are_enforced() {
+    let harness = Harness::new();
+    let repository = hooked_repository(&harness, Some("exit 7"));
+    fs::create_dir(repository.join("custom-hooks")).expect("hook directory should exist");
+    fs::rename(
+        repository.join(".git/hooks/pre-commit"),
+        repository.join("custom-hooks/pre-commit"),
+    )
+    .expect("hook should move");
+    git(&repository, &["config", "core.hooksPath", "custom-hooks"]);
+    let output = harness.run_in(&repository, &checkpoint_arguments());
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("pre-commit checks failed"));
+    assert!(!harness.log.exists());
+}
+
+#[test]
+fn successful_hook_runs_before_staged_content_is_captured() {
+    let harness = Harness::new();
+    let repository = hooked_repository(
+        &harness,
+        Some("printf 'run\\n' >>hook-runs\nprintf 'after\\n' >note.txt\ngit add note.txt"),
+    );
+    let output = harness.run_in(&repository, &checkpoint_arguments());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = fs::read_to_string(&harness.log).expect("GitHub requests should be recorded");
+    assert_eq!(
+        fs::read_to_string(repository.join("hook-runs")).expect("hook should run"),
+        "run\n"
+    );
+    assert!(log.contains("after"));
+    assert!(!log.contains("before"));
+    serde_json::from_slice::<Value>(&output.stdout).expect("hook output must not corrupt JSON");
+}
+
+#[test]
+fn dry_run_does_not_execute_native_hooks() {
+    let harness = Harness::new();
+    let repository = hooked_repository(&harness, Some("touch unexpected\nexit 7"));
+    let mut arguments = checkpoint_arguments().to_vec();
+    arguments.push("--dry-run");
+    let output = harness.run_in(&repository, &arguments);
+    assert!(output.status.success());
+    assert!(!repository.join("unexpected").exists());
+    assert!(!harness.log.exists());
+}
+
+#[test]
+fn typed_commit_requests_cannot_bypass_a_failing_hook() {
+    let harness = Harness::new();
+    let repository = hooked_repository(&harness, Some("exit 7"));
+    let request = repository.join("request.json");
+    fs::write(&request, r#"{"operation":"commit_create","repository":"owner/repo","branch":"feature/x","message":"save note","files":[{"path":"note.txt","content":"after"}]}"#)
+        .expect("request should exist");
+    let output = harness.run_in(&repository, &["apply", "--input", "request.json", "--json"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("pre-commit checks failed"));
+    assert!(!harness.log.exists());
+}
+
 #[test]
 fn commits_modes_binaries_and_workflows_through_the_user_session() {
     let harness = Harness::new();

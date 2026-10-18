@@ -187,7 +187,7 @@ fn successful_hook_runs_before_staged_content_is_captured() {
     let harness = Harness::new();
     let repository = hooked_repository(
         &harness,
-        Some("printf 'after\\n' >note.txt\ngit add note.txt"),
+        Some("printf 'run\\n' >>hook-runs\nprintf 'after\\n' >note.txt\ngit add note.txt"),
     );
     let output = harness.run_in(&repository, &checkpoint_arguments());
     assert!(
@@ -196,6 +196,10 @@ fn successful_hook_runs_before_staged_content_is_captured() {
         String::from_utf8_lossy(&output.stderr)
     );
     let log = fs::read_to_string(&harness.log).expect("GitHub requests should be recorded");
+    assert_eq!(
+        fs::read_to_string(repository.join("hook-runs")).expect("hook should run"),
+        "run\n"
+    );
     assert!(log.contains("after"));
     assert!(!log.contains("before"));
     serde_json::from_slice::<Value>(&output.stdout).expect("hook output must not corrupt JSON");

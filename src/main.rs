@@ -1180,6 +1180,7 @@ struct WorkflowDispatchWatchResult {
 #[serde(rename_all = "camelCase")]
 struct Capabilities {
     protocol_version: u8,
+    local_commit_hooks: bool,
     commands: Vec<String>,
     media: Vec<&'static str>,
     markdown: Markdown,
@@ -2652,6 +2653,7 @@ fn parse_review_comments(values: &[String]) -> Result<Vec<ReviewLineComment>> {
 fn capabilities() -> Capabilities {
     Capabilities {
         protocol_version: 1,
+        local_commit_hooks: true,
         commands: capability_commands(),
         media: media::supported_extensions(),
         markdown: markdown_capabilities(),

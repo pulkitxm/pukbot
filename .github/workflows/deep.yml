@@ -68,7 +68,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           key: sanitizer-${{ matrix.sanitizer }}
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.13'
       - run: python -m pip install git-filter-repo==2.47.0
@@ -92,10 +92,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@7c8d7d138f5c09cef361f8214cf96882cd029cdb
         with:
           components: rust-src
-      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283
         with:
           tool: cargo-careful
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.13'
       - run: python -m pip install git-filter-repo==2.47.0
@@ -115,11 +115,11 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
-      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283
         with:
           tool: cargo-mutants
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.13'
       - run: python -m pip install git-filter-repo==2.47.0
@@ -128,7 +128,7 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
         run: cargo mutants --no-shuffle --in-place --timeout 120 --shard "${SHARD}/6"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: mutants-${{ matrix.shard }}
@@ -144,7 +144,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@7c8d7d138f5c09cef361f8214cf96882cd029cdb
-      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283
         with:
           tool: cargo-minimal-versions,cargo-hack
       - run: cargo minimal-versions check --all-targets
@@ -160,7 +160,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@7c8d7d138f5c09cef361f8214cf96882cd029cdb
-      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283
         with:
           tool: cargo-udeps
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
@@ -176,7 +176,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
-      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283
         with:
           tool: cargo-msrv
       - run: cargo msrv verify
@@ -191,7 +191,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
-      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283
         with:
           tool: cargo-bloat
       - run: cargo build --release --locked
@@ -207,7 +207,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
-      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283
         with:
           tool: cargo-outdated
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6

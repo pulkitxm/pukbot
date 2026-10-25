@@ -426,10 +426,12 @@ pukbot commit create data/members.json --repo owner/repository --branch main \
   --message "data: refresh roster" --as-app
 ```
 
-The commit is created through your authenticated GitHub CLI session, so you are
-its author and committer and it counts toward your contributions. Staged
-content lands exactly as staged, including executable bits, symlinks, binary
-files, and `.github/workflows` edits. Pass `--as-app`, or set `"as_app": true`
+The commit is created through your authenticated GitHub CLI session. Both its
+author and committer use `git config user.name` and `user.email` from the current
+checkout, including for the first commit in an empty repository. Both settings
+must be present and nonempty; repository and worktree settings override global
+settings. Staged content lands exactly as staged, including executable bits,
+symlinks, binary files, and `.github/workflows` edits. Pass `--as-app`, or set `"as_app": true`
 in the typed JSON operation, to record Pukbot as both author and committer for a
 fully automated commit; those identities are resolved inside the protected
 workflow and cannot be supplied as arbitrary names or emails, and

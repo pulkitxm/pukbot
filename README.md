@@ -229,6 +229,12 @@ pukbot commit create --repo owner/repository --branch main \
   --message "data: automated update" --as-app
 ```
 
+User-authored commits use the current checkout's `git config user.name` and
+`user.email` for both author and committer, including the first commit in an
+empty repository. Both settings must be present and nonempty. Repository and
+worktree settings take precedence over global settings. Authentication still
+uses your GitHub CLI session.
+
 Staged content lands exactly as staged, including executable bits, symlinks,
 binary files, and `.github/workflows` edits. When the checkout is on the target
 branch and its HEAD is the new commit's parent, Pukbot moves the local branch

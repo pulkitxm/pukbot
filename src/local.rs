@@ -362,20 +362,13 @@ pub fn execute(operation: &Operation) -> Result<String> {
 }
 
 fn create_commit(slug: &str, branch: &str, message: &str, files: &[CommitFile]) -> Result<String> {
+    let (name, email) = commit::identity()?;
     let path = format!("repos/{slug}/git/ref/heads/{branch}");
     let response = api_output("GET", &path, None, Some(".object.sha"))?;
     if !response.status.success()
         && String::from_utf8_lossy(&response.stderr).contains("Git Repository is empty. (HTTP 409)")
     {
-        let user: Value = serde_json::from_str(&api("GET", "user", None, None)?)?;
-        let login = user["login"]
-            .as_str()
-            .context("GitHub user login is missing")?;
-        let name = user["name"].as_str().unwrap_or(login);
-        let id = user["id"].as_u64().context("GitHub user ID is missing")?;
-        let fallback_email = format!("{id}+{login}@users.noreply.github.com");
-        let email = user["email"].as_str().unwrap_or(&fallback_email);
-        return commit::create_initial(slug, branch, message, files, name, email);
+        return commit::create_initial(slug, branch, message, files, &name, &email);
     }
     let base = api_text(response, "GET", &path)?;
     let base_tree = api(
@@ -411,7 +404,13 @@ fn create_commit(slug: &str, branch: &str, message: &str, files: &[CommitFile]) 
     let commit = api(
         "POST",
         &format!("repos/{slug}/git/commits"),
-        Some(&json!({"message": message, "tree": tree, "parents": [base]})),
+        Some(&json!({
+            "message": message,
+            "tree": tree,
+            "parents": [base],
+            "author": {"name": name, "email": email},
+            "committer": {"name": name, "email": email},
+        })),
         Some(".sha"),
     )?;
     api(

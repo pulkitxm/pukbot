@@ -64,10 +64,12 @@ Stage with git add first. Pukbot reads every staged path, or only the PATH
 arguments, from the index with its content and git mode, so executables,
 symlinks, binary files, and .github/workflows edits all land as staged.
 
-By default the commit is created through your gh session, so you are its
-author and committer. With --as-app the Pukbot App commits for you through its
-workflow, which limits each file to 60,000 bytes and needs the App's Workflows
-permission for .github/workflows edits.
+By default the commit is created through your gh session. Its author and
+committer use git config user.name and user.email from the current checkout,
+including for the first commit. Both settings must be present and nonempty.
+With --as-app the Pukbot App commits for you through its workflow, which limits
+each file to 60,000 bytes and needs the App's Workflows permission for
+.github/workflows edits.
 
 For an empty repository, the default mode creates one root commit in a temporary
 Git repository and pushes it using your gh credentials. The branch must still be

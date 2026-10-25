@@ -50,6 +50,11 @@ impl Harness {
 
     fn with_behavior(behavior: &str) -> Self {
         let directory = tempfile::tempdir().expect("temporary directory should be created");
+        fs::write(
+            directory.path().join("gitconfig"),
+            "[user]\nname = Configured User\nemail = configured@example.com\n",
+        )
+        .expect("Git identity should be configured");
         let executable_directory = directory.path().join("bin");
         fs::create_dir(&executable_directory).expect("fake executable directory should be created");
         let executable = executable_directory.join("gh");
@@ -307,9 +312,59 @@ fn commits_modes_binaries_and_workflows_through_the_user_session() {
     assert!(bodies.contains(&serde_json::json!({
         "message": "feat: ship it",
         "tree": "tree222",
-        "parents": ["base111"]
+        "parents": ["base111"],
+        "author": {"name": "Configured User", "email": "configured@example.com"},
+        "committer": {"name": "Configured User", "email": "configured@example.com"}
     })));
     assert!(bodies.contains(&serde_json::json!({"sha": "commit222", "force": false})));
+}
+
+#[test]
+fn repository_identity_overrides_the_global_identity() {
+    let harness = Harness::new();
+    let repository = hooked_repository(&harness, None);
+    git(&repository, &["config", "user.name", "Repository User"]);
+    git(
+        &repository,
+        &["config", "user.email", "repository@example.com"],
+    );
+    let output = harness.run_in(&repository, &checkpoint_arguments());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let log = fs::read_to_string(&harness.log).expect("GitHub requests should be recorded");
+    let body = log
+        .lines()
+        .filter_map(|line| line.strip_prefix("body="))
+        .map(|body| serde_json::from_str::<Value>(body).expect("body should be JSON"))
+        .find(|body| body.get("author").is_some())
+        .expect("commit request should include an identity");
+    let identity = serde_json::json!({
+        "name": "Repository User",
+        "email": "repository@example.com"
+    });
+    assert_eq!(body["author"], identity);
+    assert_eq!(body["committer"], identity);
+}
+
+#[test]
+fn missing_or_empty_identity_stops_before_contacting_github() {
+    for (config, key) in [
+        ("[user]\nemail = configured@example.com\n", "user.name"),
+        ("[user]\nname = Configured User\n", "user.email"),
+        ("[user]\nname = Configured User\nemail =\n", "user.email"),
+    ] {
+        let harness = Harness::new();
+        let repository = hooked_repository(&harness, None);
+        fs::write(harness.directory.path().join("gitconfig"), config)
+            .expect("Git configuration should be written");
+        let output = harness.run_in(&repository, &checkpoint_arguments());
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains(&format!("set {key}")));
+        assert!(!harness.log.exists());
+    }
 }
 
 #[test]
@@ -344,9 +399,6 @@ const EMPTY_BEHAVIOR: &str = r#"case "$*" in
     "api --method GET repos/owner/repo/git/ref/heads/main --jq .object.sha")
         printf '%s\n' 'gh: Git Repository is empty. (HTTP 409)' >&2
         exit 1
-        ;;
-    "api --method GET user")
-        printf '%s\n' '{"login":"octocat","id":123,"name":"Test User","email":null}'
         ;;
     *) exit 91 ;;
 esac"#;
@@ -465,7 +517,7 @@ fn initializes_an_empty_repository_with_staged_content_and_modes() {
             &remote,
             &["show", "-s", "--format=%an <%ae>|%cn <%ce>", "main"]
         ),
-        "Test User <123+octocat@users.noreply.github.com>|Test User <123+octocat@users.noreply.github.com>"
+        "Configured User <configured@example.com>|Configured User <configured@example.com>"
     );
     assert!(
         git_output(&remote, &["show", "-s", "--format=%B", "main"])

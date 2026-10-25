@@ -9,6 +9,18 @@ use serde::Serialize;
 use crate::model::{CommitFile, CommitFileDocument, ContentEncoding, FileMode, Repository};
 use crate::{crew, gh};
 
+pub fn identity() -> Result<(String, String)> {
+    let configured = |key: &str| -> Result<String> {
+        let value = git(Path::new("."), &["config", "--get", key])
+            .with_context(|| format!("set {key} with git config before creating a commit"))?;
+        if value.is_empty() {
+            bail!("set {key} with git config before creating a commit");
+        }
+        Ok(value)
+    };
+    Ok((configured("user.name")?, configured("user.email")?))
+}
+
 pub fn create_initial(
     slug: &str,
     branch: &str,

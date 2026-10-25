@@ -93,7 +93,7 @@ jobs:
           persist-credentials: false
       - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc
         with:
-          tool: taplo-cli,cargo-sort
+          tool: taplo-cli,cargo-sort@2.1.3
       - run: taplo fmt --check --diff
       - run: taplo lint
       - run: cargo sort --check --check-format

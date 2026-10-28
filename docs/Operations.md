@@ -497,6 +497,56 @@ rewritten tip's commit URL in `resourceUrl`. The local checkout is independent
 of the temporary clone. Fetch the rewritten branch and create a fresh worktree
 for subsequent work.
 
+## Local history redate
+
+```bash
+pukbot history redate --branch feat --base main --end-at now --dry-run
+```
+
+The command works only on the local repository and never contacts GitHub.
+`--branch` defaults to the checked-out branch, `--base` to `main`, and
+`--end-at` to `now`; an explicit `--end-at` takes an RFC 3339 date that is not
+in the future.
+
+Only commits reachable from the branch and not from the base move. The branch
+tip takes the `--end-at` time and every earlier commit keeps its distance to the
+tip, so a branch committed at 21:01, 21:32, and 22:30 and redated at 16:15 the
+next day becomes 14:46, 15:17, and 16:15. Author and committer dates both take
+the new time, and each commit keeps its own time zone offset. Trees, message
+bytes, author and committer identities, and merge parents are unchanged; parents
+on the base branch keep their original commits. Commit IDs change and
+signatures are not carried over.
+
+The command refuses a branch with no commits beyond the base, an `--end-at` in
+the future, a result that would date commits before the fork point, a commit
+dated after the branch tip, and a commit with a custom encoding header.
+
+Before moving the branch, Pukbot creates `--backup-branch`, by default
+`backup/BRANCH-redate-YYYYMMDD-HHMMSS`, and updates both refs in one atomic
+`git update-ref` transaction that also checks the branch has not moved. A
+checked-out branch keeps its index and working tree, because the rewritten tip
+has the same tree. To undo on the branch itself, run `git reset --soft BACKUP`.
+
+```json
+{
+  "branch": "feat",
+  "base": "main",
+  "previousHead": "5598f54...",
+  "head": "c0d1571...",
+  "backupBranch": "backup/feat-redate-20261028-161500",
+  "dryRun": false,
+  "commits": [
+    {
+      "original": "5598f54...",
+      "rewritten": "c0d1571...",
+      "subject": "feat: third",
+      "previousDate": "2026-10-27T22:30:00+05:30",
+      "date": "2026-10-28T16:15:00+05:30"
+    }
+  ]
+}
+```
+
 ## Repository dispatches
 
 ```bash

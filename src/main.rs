@@ -5,6 +5,7 @@ mod crew;
 mod doctor;
 mod error;
 mod gh;
+mod history;
 mod history_root;
 mod local;
 mod manual;
@@ -84,6 +85,23 @@ local branch is left untouched, reconcile it with git fetch and git rebase, neve
 git reset --hard, because a failed or partial commit leaves your edits only in
 the working tree.";
 
+const HISTORY_REDATE_LONG_HELP: &str =
+    "Move a local branch's commits so the last one lands at --end-at.
+
+Only commits on the branch that are not on --base move. The branch tip gets the
+--end-at time, now by default, and every earlier commit keeps its distance to
+the tip, so the gaps between commits stay the same. Author and committer dates
+both take the new time, and each commit keeps its own time zone.
+
+Trees, messages, authors, committers, and the commit order are unchanged. Commit
+IDs change and signatures are not carried over. Nothing is pushed.
+
+Before moving the branch, Pukbot saves its previous head as --backup-branch,
+backup/BRANCH-redate-TIMESTAMP by default, in the same atomic ref update. A
+checked-out branch keeps its index and working tree, because the rewritten tip
+has the same content. Undo with git branch -f BRANCH BACKUP while another branch
+is checked out, or git reset --soft BACKUP on the branch itself.";
+
 const BODY_FILE_LONG_HELP: &str =
     "Read the GitHub-flavored Markdown body from a file, or from standard input when the path is -.
 
@@ -132,6 +150,11 @@ enum Commands {
     Crew {
         #[command(subcommand)]
         command: CrewCommand,
+    },
+    #[command(about = "Rewrite local branch history without pushing")]
+    History {
+        #[command(subcommand)]
+        command: HistoryCommand,
     },
     Wiki {
         #[command(subcommand)]
@@ -266,6 +289,29 @@ struct CrewAccountArgs {
 struct CrewForgetArgs {
     #[arg(value_name = "AGENT")]
     agent: String,
+}
+
+#[derive(Debug, Subcommand)]
+enum HistoryCommand {
+    #[command(
+        about = "Move a local branch's commits to a new time, keeping the gaps between them",
+        long_about = HISTORY_REDATE_LONG_HELP
+    )]
+    Redate(HistoryRedateArgs),
+}
+
+#[derive(Debug, Args)]
+struct HistoryRedateArgs {
+    #[arg(long, value_name = "BRANCH")]
+    branch: Option<String>,
+    #[arg(long, value_name = "REVISION", default_value = "main")]
+    base: String,
+    #[arg(long, value_name = "now|RFC3339", default_value = "now")]
+    end_at: String,
+    #[arg(long, value_name = "BRANCH")]
+    backup_branch: Option<String>,
+    #[arg(long)]
+    dry_run: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1343,6 +1389,7 @@ fn run(cli: Cli) -> Result<()> {
         Commands::StackApi { command } => run_stack_api(command, cli.json),
         Commands::Commit { command } => run_commit(command, cli.json),
         Commands::Crew { command } => run_crew(command, cli.json),
+        Commands::History { command } => run_history(command, cli.json),
         Commands::Wiki { command } => run_wiki(command, cli.json),
         Commands::Repository { command } => run_repository(command, cli.json),
         Commands::Ref { command } => run_git_ref(command, cli.json),
@@ -2019,6 +2066,45 @@ fn run_crew(command: CrewCommand, json: bool) -> Result<()> {
             }
         }
     }
+}
+
+fn run_history(command: HistoryCommand, json: bool) -> Result<()> {
+    let HistoryCommand::Redate(args) = command;
+    let outcome = history::redate(&history::Redate {
+        branch: args.branch.as_deref(),
+        base: &args.base,
+        end_at: &args.end_at,
+        backup_branch: args.backup_branch.as_deref(),
+        dry_run: args.dry_run,
+    })?;
+    if json {
+        return emit_json(&outcome);
+    }
+    let mut stdout = io::stdout().lock();
+    for commit in &outcome.commits {
+        writeln!(
+            stdout,
+            "{}  {}  ->  {}  {}",
+            &commit.original[..7],
+            commit.previous_date,
+            commit.date,
+            commit.subject
+        )?;
+    }
+    if outcome.dry_run {
+        writeln!(
+            stdout,
+            "Dry run: {} is unchanged; the backup would be {}",
+            outcome.branch, outcome.backup_branch
+        )?;
+    } else {
+        writeln!(
+            stdout,
+            "Saved the previous {} as {}",
+            outcome.branch, outcome.backup_branch
+        )?;
+    }
+    Ok(())
 }
 
 fn crew_repository(args: &CrewTargetArgs) -> Result<Repository> {
@@ -2741,6 +2827,7 @@ fn capability_commands() -> Vec<String> {
         "crew.define",
         "crew.forget",
         "crew.account",
+        "history.redate",
         "wiki.publish",
         "repository.dispatch",
         "repository.sync-fork",

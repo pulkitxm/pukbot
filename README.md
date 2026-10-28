@@ -274,6 +274,17 @@ Pukbot rewrites in an isolated clone, verifies each commit's tree, message,
 identity, dates, and merge ancestry, and publishes the backup and replacement
 together using exact ref leases. See [Repository history](docs/Operations.md#repository-history).
 
+Move a local branch's commits so the last one lands now, keeping the gaps
+between them:
+
+```bash
+pukbot history redate --branch feat --base main --dry-run
+pukbot history redate --branch feat --base main
+```
+
+Nothing is pushed. The previous head is saved as a backup branch in the same
+atomic ref update. See [Local history redate](docs/Operations.md#local-history-redate).
+
 Manage releases and upload assets as Pukbot:
 
 ```bash
